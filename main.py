@@ -15,7 +15,7 @@ def inject_css() -> None:
     st.markdown(
         """
         <style>
-        .block-container { max-width: 1320px; padding-top: 1rem; padding-bottom: 1.4rem; }
+        .block-container { max-width: 1380px; padding-top: 1rem; padding-bottom: 1.4rem; }
         header, footer {visibility: hidden;}
         div[data-testid="stToolbar"] {visibility: hidden; height: 0px;}
 
@@ -36,6 +36,13 @@ def inject_css() -> None:
         .hr {height:1px; background: rgba(255,255,255,0.08); margin: 0.9rem 0 1.0rem 0;}
         </style>
         """,
+        unsafe_allow_html=True,
+    )
+
+
+def kpi_card(label: str, value: str, sub: str = "") -> None:
+    st.markdown(
+        f"""<div class="kpi"><div class="label">{label}</div><div class="value">{value}</div><div class="sub">{sub}</div></div>""",
         unsafe_allow_html=True,
     )
 
@@ -85,7 +92,7 @@ def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
     - Nombre = DNI
     - Marc.  = Apellido, Nombre
     - Estado = dd/mm/yyyy HH:MM
-    - NvoEstado = puede ser cualquier cosa (no confiamos)
+    - NvoEstado = no confiamos (algunas veces todo queda como entrada)
     """
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
@@ -160,7 +167,10 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
         if pd.notna(first) and pd.notna(last) and last >= first:
             span = int((last - first).total_seconds() // 60)
 
-        incompleto = (marc < 2) or (pairs == 0 and tipo == "Docente") or (marc < 2 and tipo == "NO Docente")
+        # Incompleto:
+        # - NO Docente: si no hay al menos 2 marcas no hay corrido real
+        # - Docente: si no hay pares estimados, no hay tramos
+        incompleto = (marc < 2) if tipo == "NO Docente" else (pairs == 0)
         cortes = (pairs >= 2)
 
         if tipo == "Docente":
@@ -169,7 +179,7 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
             saldo = 0
             cumple = ""
         else:
-            worked = span if (pd.notna(first) and pd.notna(last) and marc >= 2) else 0
+            worked = span if (marc >= 2 and pd.notna(first) and pd.notna(last)) else 0
             expected = expected_nodoc if marc >= 1 else 0
             saldo = worked - expected if expected else 0
             if expected and not incompleto:
@@ -210,55 +220,42 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
 # =========================
 # Corrección automática NO Docente
 # =========================
-def correct_missing_punches_for_employee(
-    raw_emp: pd.DataFrame,
-    expected_nodoc: int,
-) -> tuple[pd.DataFrame, int]:
+def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
     """
-    Aplica corrección SOLO para NO Docente:
-    - Si un día tiene 1 marcación: crea la segunda para completar expected_nodoc
-      * Si solo hay una marca (t): asume que esa es la entrada y agrega salida = t + expected
-      * Si preferís lo inverso, se puede ajustar, pero tu ejemplo es entrada sin salida.
-    - Si un día tiene 0 (no debería pasar), no toca.
-    Devuelve (raw_emp_corregido, cantidad_correcciones)
+    SOLO NO Docente:
+    - Si un día tiene 1 marcación: agrega la segunda para completar expected (6/7h)
+      Regla: la única marca se toma como entrada (como tu ejemplo).
     """
     if raw_emp.empty:
         return raw_emp, 0
 
     corrected = raw_emp.copy()
     corrected["Fecha"] = corrected["FechaHora"].dt.date
-    nfix = 0
 
     fixes = []
+    nfix = 0
     for day, g in corrected.groupby("Fecha"):
         times = sorted(g["FechaHora"].tolist())
         if len(times) == 1:
             t = times[0]
-            # regla: si hay una sola marca, la tomamos como entrada (como tu ejemplo)
             fix_out = t + pd.to_timedelta(expected_nodoc, unit="m")
-            fixes.append({"FechaHora": fix_out, "Fecha": day, "__FIX__": True})
+            fixes.append({"FechaHora": fix_out, "Fecha": day})
             nfix += 1
 
     if fixes:
-        fx = pd.DataFrame(fixes)
-        # clonamos la estructura
-        base = corrected.iloc[0:1].copy()
-        base = base.iloc[0:0]  # vacío con columnas
-
-        # construir filas artificiales
         fx_rows = []
-        for _, r in fx.iterrows():
-            row = corrected.iloc[0].copy()
-            row["FechaHora"] = r["FechaHora"]
-            row["Fecha"] = r["Fecha"]
-            # marcadores opcionales
-            row["NvoEstado"] = "AUTO_FIX"  # no importa para cálculo
+        template = corrected.iloc[0].copy()
+        for f in fixes:
+            row = template.copy()
+            row["FechaHora"] = f["FechaHora"]
+            row["Fecha"] = f["Fecha"]
+            row["NvoEstado"] = "AUTO_FIX"
+            row["Estado"] = row["FechaHora"].strftime("%d/%m/%Y %H:%M")
             fx_rows.append(row)
 
         add = pd.DataFrame(fx_rows)
         corrected = pd.concat([corrected, add], ignore_index=True).sort_values("FechaHora").reset_index(drop=True)
 
-    # recomputar Fecha
     corrected["Fecha"] = corrected["FechaHora"].dt.date
     return corrected, nfix
 
@@ -281,6 +278,9 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
             Marcaciones=("Marcaciones", "sum"),
             Esperado_min=("Esperado_min", "sum"),
             Saldo_min=("Saldo_min", "sum"),
+            Dias_OK=("Cumple", lambda x: int((x == "OK").sum())),
+            Dias_FALTA=("Cumple", lambda x: int((x == "FALTA").sum())),
+            Dias_INCOMPL=("Cumple", lambda x: int((x == "INCOMPLETO").sum())),
         )
         .sort_values(["Tipo", "Empleado"])
         .reset_index(drop=True)
@@ -334,12 +334,9 @@ def export_employee_excel(
         }])
         cfg.to_excel(writer, sheet_name="Empleado", index=False)
 
-        kdf = pd.DataFrame([kpi_block])
-        kdf.to_excel(writer, sheet_name="KPIs", index=False)
+        pd.DataFrame([kpi_block]).to_excel(writer, sheet_name="KPIs", index=False)
 
-        daily_out = daily_emp.drop(
-            columns=["Esperado_min", "Saldo_min"], errors="ignore"
-        ).copy()
+        daily_out = daily_emp.drop(columns=["Esperado_min", "Saldo_min"], errors="ignore").copy()
         daily_out.to_excel(writer, sheet_name="Detalle_Diario", index=False)
 
         raw_out = raw_emp.copy()
@@ -348,7 +345,6 @@ def export_employee_excel(
         raw_out = raw_out.sort_values("FechaHora")[["Fecha", "Hora"]]
         raw_out.to_excel(writer, sheet_name="Marcaciones", index=False)
 
-        # widths
         for sheet in writer.book.sheetnames:
             ws = writer.book[sheet]
             for col in ws.columns:
@@ -364,14 +360,35 @@ def export_employee_excel(
 
 
 # =========================
+# Estadísticas generales (helpers)
+# =========================
+def safe_pct(a: int, b: int) -> str:
+    if b <= 0:
+        return "0%"
+    return f"{(a / b * 100):.0f}%"
+
+
+def histogram_hours(series_minutes: pd.Series, bin_hours: list[tuple[float, float]]) -> pd.DataFrame:
+    hours = series_minutes.fillna(0).astype(int) / 60.0
+    rows = []
+    for lo, hi in bin_hours:
+        label = f"{lo:.0f}-{hi:.0f}h" if hi < 999 else f"{lo:.0f}h+"
+        if hi >= 999:
+            cnt = int((hours >= lo).sum())
+        else:
+            cnt = int(((hours >= lo) & (hours < hi)).sum())
+        rows.append({"Rango": label, "Días": cnt})
+    return pd.DataFrame(rows)
+
+
+# =========================
 # App
 # =========================
 def main() -> None:
     st.set_page_config(page_title="Asistencia RRHH", page_icon="🕒", layout="centered")
     inject_css()
 
-    # Header
-    a, b, c = st.columns([1.2, 0.85, 1.0])
+    a, b, c = st.columns([1.2, 0.9, 1.0])
     with a:
         st.markdown("## 🕒 Asistencia RRHH")
     with b:
@@ -389,13 +406,10 @@ def main() -> None:
     df0 = read_excel_auto(file)
     validate_format(df0)
     raw0 = parse_and_clean(df0)
-
-    profiles = init_profiles(raw0)
-
-    # Tabs
-    tabs = st.tabs(["General", "Empleado", "Perfiles"])
+    _ = init_profiles(raw0)
 
     expected = 360 if reduced else 420
+    tabs = st.tabs(["General", "Empleado", "Perfiles"])
 
     # =======================
     # GENERAL
@@ -407,59 +421,106 @@ def main() -> None:
         daily = calc_daily(raw, expected)
         summary = summarize(daily)
 
-        # KPIs globales
+        # Global KPIs
         total_min = int(daily["Minutos"].sum()) if not daily.empty else 0
         empleados = int(summary.shape[0]) if not summary.empty else 0
         dias = int(daily["Fecha"].nunique()) if not daily.empty else 0
+        prom_dia = int(round(daily["Minutos"].mean())) if not daily.empty else 0
+        mediana_dia = int(round(daily["Minutos"].median())) if not daily.empty else 0
+        p90_dia = int(round(daily["Minutos"].quantile(0.90))) if not daily.empty else 0
+
+        total_marc = int(daily["Marcaciones"].sum()) if not daily.empty else 0
+        prom_marc_dia = (total_marc / max(int(daily.shape[0]), 1)) if not daily.empty else 0
+
         incompletos = int((daily["Incompleto"] == "SI").sum()) if not daily.empty else 0
         cortes = int((daily["Cortes"] == "SI").sum()) if not daily.empty else 0
-        prom_dia = int(round(daily["Minutos"].mean())) if not daily.empty else 0
+        total_registros_dia = int(daily.shape[0]) if not daily.empty else 0
 
+        # NO Docente (extras/faltas/saldo)
         nod = daily[daily["Tipo"] == "NO Docente"].copy()
-        exp_sum = int(nod["Esperado_min"].sum()) if not nod.empty else 0
         nod_sum = int(nod["Minutos"].sum()) if not nod.empty else 0
-        nod_pct = f"{(nod_sum/exp_sum*100):.0f}%" if exp_sum > 0 else ""
+        nod_exp_sum = int(nod["Esperado_min"].sum()) if not nod.empty else 0
+        nod_pct = f"{(nod_sum / nod_exp_sum * 100):.0f}%" if nod_exp_sum > 0 else ""
+
+        nod_extras = int(nod.loc[nod["Saldo_min"] > 0, "Saldo_min"].sum()) if not nod.empty else 0
+        nod_faltas = int((-nod.loc[nod["Saldo_min"] < 0, "Saldo_min"].sum())) if not nod.empty else 0
+        nod_saldo = int(nod["Saldo_min"].sum()) if not nod.empty else 0
 
         doc = daily[daily["Tipo"] == "Docente"].copy()
-        doc_total = int(doc["Minutos"].sum()) if not doc.empty else 0
+        doc_sum = int(doc["Minutos"].sum()) if not doc.empty else 0
 
-        k1, k2, k3, k4 = st.columns(4)
-        k1.markdown(f"""<div class="kpi"><div class="label">Empleados</div><div class="value">{empleados}</div><div class="sub">Días: {dias}</div></div>""", unsafe_allow_html=True)
-        k2.markdown(f"""<div class="kpi"><div class="label">Total</div><div class="value">{minutes_to_hhmm(total_min)}</div><div class="sub">Prom/día: {minutes_to_hhmm(prom_dia)}</div></div>""", unsafe_allow_html=True)
-        k3.markdown(f"""<div class="kpi"><div class="label">Incompletos</div><div class="value">{incompletos}</div><div class="sub">días con marcas insuficientes</div></div>""", unsafe_allow_html=True)
-        k4.markdown(f"""<div class="kpi"><div class="label">Cortes</div><div class="value">{cortes}</div><div class="sub">varios tramos estimados</div></div>""", unsafe_allow_html=True)
+        # KPIs en “burbujas” (2 filas)
+        r1 = st.columns(4)
+        with r1[0]: kpi_card("Empleados", f"{empleados}", f"Días: {dias}")
+        with r1[1]: kpi_card("Total", minutes_to_hhmm(total_min), f"Prom/día: {minutes_to_hhmm(prom_dia)}")
+        with r1[2]: kpi_card("Mediana / P90", f"{minutes_to_hhmm(mediana_dia)}", f"P90: {minutes_to_hhmm(p90_dia)}")
+        with r1[3]: kpi_card("Marcaciones", f"{total_marc}", f"Prom por día: {prom_marc_dia:.2f}")
 
-        k5, k6, k7 = st.columns(3)
-        k5.markdown(f"""<div class="kpi"><div class="label">NO Docente</div><div class="value">{minutes_to_hhmm(nod_sum)}</div><div class="sub">Cumplimiento: {nod_pct}</div></div>""", unsafe_allow_html=True)
-        k6.markdown(f"""<div class="kpi"><div class="label">Docente</div><div class="value">{minutes_to_hhmm(doc_total)}</div><div class="sub">por tramos estimados</div></div>""", unsafe_allow_html=True)
-        k7.markdown(f"""<div class="kpi"><div class="label">Marcaciones</div><div class="value">{int(raw.shape[0])}</div><div class="sub">filas del Excel</div></div>""", unsafe_allow_html=True)
+        r2 = st.columns(4)
+        with r2[0]: kpi_card("Incompletos", f"{incompletos}", f"{safe_pct(incompletos, total_registros_dia)} de los días")
+        with r2[1]: kpi_card("Cortes", f"{cortes}", f"{safe_pct(cortes, total_registros_dia)} de los días")
+        with r2[2]: kpi_card("NO Docente", minutes_to_hhmm(nod_sum), f"Cumplimiento: {nod_pct}")
+        with r2[3]: kpi_card("Docente", minutes_to_hhmm(doc_sum), "Tramos estimados por tiempo")
+
+        r3 = st.columns(4)
+        with r3[0]: kpi_card("Extras NO Docente", minutes_to_hhmm(nod_extras), "Saldo positivo acumulado")
+        with r3[1]: kpi_card("Faltas NO Docente", minutes_to_hhmm(nod_faltas), "Saldo negativo acumulado")
+        with r3[2]: kpi_card("Saldo neto NO Docente", delta_short(nod_saldo), "Extras - faltas")
+        with r3[3]:
+            # días OK/FALTA/INCOMPL (NO Docente)
+            ok = int((nod["Cumple"] == "OK").sum()) if not nod.empty else 0
+            fa = int((nod["Cumple"] == "FALTA").sum()) if not nod.empty else 0
+            ic = int((nod["Cumple"] == "INCOMPLETO").sum()) if not nod.empty else 0
+            kpi_card("NO Docente días", f"{ok}/{fa}/{ic}", "OK / FALTA / INCOMP")
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        # Gráfico: horas por día (global)
+        # Gráficos generales
         if not daily.empty:
             by_day = daily.groupby("Fecha", as_index=False).agg(Minutos=("Minutos", "sum"))
             by_day["Horas"] = by_day["Minutos"] / 60.0
             by_day = by_day.sort_values("Fecha")
+
             st.markdown("### Horas totales por día")
             st.line_chart(by_day.set_index("Fecha")[["Horas"]], height=220)
 
-        # Rankings
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-        colL, colR = st.columns(2)
+            # Por tipo
+            by_day_tipo = daily.groupby(["Fecha", "Tipo"], as_index=False).agg(Minutos=("Minutos", "sum"))
+            pivot = by_day_tipo.pivot(index="Fecha", columns="Tipo", values="Minutos").fillna(0) / 60.0
+            st.markdown("### Horas por día (NO Docente vs Docente)")
+            st.area_chart(pivot, height=220)
 
-        with colL:
-            st.markdown("### Top 10 · más horas")
+            # Histograma
+            st.markdown("### Distribución (horas por día)")
+            bins = [(0, 2), (2, 4), (4, 6), (6, 8), (8, 10), (10, 999)]
+            hist = histogram_hours(daily["Minutos"], bins)
+            hist = hist.set_index("Rango")
+            st.bar_chart(hist[["Días"]], height=220)
+
+            # Top 15 horas por empleado
+            st.markdown("### Top 15 empleados por horas")
             top_hours = (
                 daily.groupby(["Empleado", "DNI", "Tipo"], as_index=False)
                 .agg(Total_min=("Minutos", "sum"))
                 .sort_values("Total_min", ascending=False)
-                .head(10)
+                .head(15)
             )
-            top_hours["Total"] = top_hours["Total_min"].apply(minutes_to_hhmm)
-            st.dataframe(top_hours[["Empleado", "DNI", "Tipo", "Total"]], use_container_width=True, height=320)
+            top_hours["Total_horas"] = top_hours["Total_min"] / 60.0
+            top_hours = top_hours.set_index("Empleado")
+            st.bar_chart(top_hours[["Total_horas"]], height=260)
 
-        with colR:
+            # Incompletos por día
+            st.markdown("### Incompletos por día")
+            inc_day = daily.assign(Incomp=(daily["Incompleto"] == "SI").astype(int)).groupby("Fecha", as_index=False).agg(Incompletos=("Incomp", "sum"))
+            inc_day = inc_day.set_index("Fecha")
+            st.bar_chart(inc_day[["Incompletos"]], height=220)
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        # Rankings / Tablas
+        cL, cR = st.columns(2)
+
+        with cL:
             st.markdown("### Top 10 · más incompletos")
             top_inc = (
                 daily.groupby(["Empleado", "DNI", "Tipo"], as_index=False)
@@ -469,11 +530,21 @@ def main() -> None:
             )
             st.dataframe(top_inc, use_container_width=True, height=320)
 
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-        st.markdown("### Resumen")
-        st.dataframe(summary, use_container_width=True, height=420)
+        with cR:
+            st.markdown("### Top 10 · más cortes")
+            top_cut = (
+                daily.groupby(["Empleado", "DNI", "Tipo"], as_index=False)
+                .agg(Cortes=("Cortes", lambda x: int((x == "SI").sum())))
+                .sort_values("Cortes", ascending=False)
+                .head(10)
+            )
+            st.dataframe(top_cut, use_container_width=True, height=320)
 
-        # guardar para Empleado
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+        st.markdown("### Resumen completo")
+        st.dataframe(summary, use_container_width=True, height=440)
+
+        # cache para Empleado
         st.session_state["__raw__"] = raw
         st.session_state["__daily__"] = daily
         st.session_state["__summary__"] = summary
@@ -498,90 +569,117 @@ def main() -> None:
         r = disp[disp["Display"] == selected].iloc[0]
         emp, dni, tipo = r["Empleado"], r["DNI"], r["Tipo"]
 
-        raw_emp = raw[(raw["Empleado"] == emp) & (raw["DNI"] == dni) & (raw["Tipo"] == tipo)].copy()
-        raw_emp = raw_emp.sort_values("FechaHora")
+        raw_emp = raw[(raw["Empleado"] == emp) & (raw["DNI"] == dni) & (raw["Tipo"] == tipo)].copy().sort_values("FechaHora")
 
-        # toggle de corrección SOLO si NO Docente
+        # botón corrección (NO Docente)
         fix = False
         fixes_applied = 0
+        if tipo == "NO Docente":
+            fix = st.button("Corregir falta de marcación", use_container_width=True)
 
-        left, right = st.columns([1.0, 1.0])
-        with left:
-            if tipo == "NO Docente":
-                fix = st.button("Corregir falta de marcación", use_container_width=True)
-            else:
-                st.markdown("""<div class="pill">Docente: no aplica corrección automática</div>""", unsafe_allow_html=True)
-
-        # aplicar corrección al empleado (solo si apretó botón)
         if tipo == "NO Docente" and fix:
             corrected_raw_emp, fixes_applied = correct_missing_punches_for_employee(raw_emp, expected)
-            # reemplazar dentro del raw global para recalcular daily del empleado
+
+            # reemplazar en raw global (solo para recalcular este empleado)
             raw_corrected = raw.copy()
             mask = (raw_corrected["Empleado"] == emp) & (raw_corrected["DNI"] == dni) & (raw_corrected["Tipo"] == tipo)
             raw_corrected = raw_corrected[~mask]
             raw_corrected = pd.concat([raw_corrected, corrected_raw_emp], ignore_index=True)
             raw_corrected = raw_corrected.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
 
-            # recalcular daily completo, pero mostramos el empleado
             daily_corrected = calc_daily(raw_corrected, expected)
             daily_emp = daily_corrected[(daily_corrected["Empleado"] == emp) & (daily_corrected["DNI"] == dni) & (daily_corrected["Tipo"] == tipo)].copy()
             raw_emp = corrected_raw_emp
         else:
             daily_emp = daily[(daily["Empleado"] == emp) & (daily["DNI"] == dni) & (daily["Tipo"] == tipo)].copy()
 
-        # KPIs del empleado
-        total_min = int(daily_emp["Minutos"].sum()) if not daily_emp.empty else 0
-        dias = int(daily_emp["Fecha"].nunique()) if not daily_emp.empty else 0
+        if daily_emp.empty:
+            st.warning("Sin datos para este empleado.")
+            return
+
+        # KPIs empleado
+        total_min = int(daily_emp["Minutos"].sum())
+        dias = int(daily_emp["Fecha"].nunique())
         prom = int(round(daily_emp["Minutos"].mean())) if dias else 0
-        inc = int((daily_emp["Incompleto"] == "SI").sum()) if not daily_emp.empty else 0
-        cuts = int((daily_emp["Cortes"] == "SI").sum()) if not daily_emp.empty else 0
-        marc = int(daily_emp["Marcaciones"].sum()) if not daily_emp.empty else 0
 
-        exp_sum = int(daily_emp["Esperado_min"].sum()) if not daily_emp.empty else 0
-        saldo_sum = int(daily_emp["Saldo_min"].sum()) if not daily_emp.empty else 0
+        inc = int((daily_emp["Incompleto"] == "SI").sum())
+        cuts = int((daily_emp["Cortes"] == "SI").sum())
+        marc_total = int(daily_emp["Marcaciones"].sum())
+        marc_prom = marc_total / max(int(daily_emp.shape[0]), 1)
 
-        # EXTRAS DEL MES (NO Docente): solo positivos acumulados
+        pares_0 = int((daily_emp["Pares_estimados"] == 0).sum())
+
+        max_day = int(daily_emp["Minutos"].max())
+        min_day = int(daily_emp["Minutos"].min())
+
+        exp_sum = int(daily_emp["Esperado_min"].sum())
+        saldo_sum = int(daily_emp["Saldo_min"].sum())
+
+        ok_days = int((daily_emp["Cumple"] == "OK").sum())
+        falta_days = int((daily_emp["Cumple"] == "FALTA").sum())
+        incom_days = int((daily_emp["Cumple"] == "INCOMPLETO").sum())
+
         extras_min = 0
         faltas_min = 0
-        if tipo == "NO Docente" and not daily_emp.empty:
+        pct = ""
+        if tipo == "NO Docente":
             extras_min = int(daily_emp.loc[daily_emp["Saldo_min"] > 0, "Saldo_min"].sum())
             faltas_min = int((-daily_emp.loc[daily_emp["Saldo_min"] < 0, "Saldo_min"].sum()))
+            pct = f"{(total_min/exp_sum*100):.0f}%" if exp_sum > 0 else ""
 
-        pct = f"{(total_min/exp_sum*100):.0f}%" if exp_sum > 0 else ""
+        # KPIs en burbujas (más completas)
+        r1 = st.columns(4)
+        with r1[0]: kpi_card(emp, minutes_to_hhmm(total_min), f"{tipo} · DNI {dni}")
+        with r1[1]: kpi_card("Días", f"{dias}", f"Prom/día: {minutes_to_hhmm(prom)}")
+        with r1[2]: kpi_card("Marcaciones", f"{marc_total}", f"Prom/día: {marc_prom:.2f} · Pares=0: {pares_0}")
+        with r1[3]:
+            if tipo == "NO Docente":
+                kpi_card("Extras del mes", minutes_to_hhmm(extras_min), f"Faltas: {minutes_to_hhmm(faltas_min)} · Cumpl: {pct}")
+            else:
+                kpi_card("Total (Docente)", minutes_to_hhmm(total_min), "Por tramos estimados")
 
-        k1, k2, k3, k4 = st.columns(4)
-        k1.markdown(f"""<div class="kpi"><div class="label">{emp}</div><div class="value">{minutes_to_hhmm(total_min)}</div><div class="sub">{tipo} · DNI {dni}</div></div>""", unsafe_allow_html=True)
-        k2.markdown(f"""<div class="kpi"><div class="label">Días</div><div class="value">{dias}</div><div class="sub">Prom/día: {minutes_to_hhmm(prom)}</div></div>""", unsafe_allow_html=True)
-        k3.markdown(f"""<div class="kpi"><div class="label">Marcaciones</div><div class="value">{marc}</div><div class="sub">Cortes: {cuts} · Incompletos: {inc}</div></div>""", unsafe_allow_html=True)
-
-        if tipo == "NO Docente":
-            k4.markdown(
-                f"""<div class="kpi"><div class="label">Extras del mes</div><div class="value">{minutes_to_hhmm(extras_min)}</div>
-                <div class="sub">Faltas: {minutes_to_hhmm(faltas_min)} · Cumplimiento: {pct}</div></div>""",
-                unsafe_allow_html=True
-            )
-        else:
-            k4.markdown(f"""<div class="kpi"><div class="label">Total tramos</div><div class="value">{minutes_to_hhmm(total_min)}</div><div class="sub">Cálculo por alternancia</div></div>""", unsafe_allow_html=True)
+        r2 = st.columns(4)
+        with r2[0]: kpi_card("Incompletos", f"{inc}", f"Cortes: {cuts}")
+        with r2[1]: kpi_card("Máx / Mín día", minutes_to_hhmm(max_day), f"Mín: {minutes_to_hhmm(min_day)}")
+        with r2[2]:
+            if tipo == "NO Docente":
+                kpi_card("Saldo neto", delta_short(saldo_sum), "Acumulado del mes")
+            else:
+                kpi_card("Cortes", f"{cuts}", "Días con varios tramos")
+        with r2[3]:
+            if tipo == "NO Docente":
+                kpi_card("Días OK/FALTA/INC", f"{ok_days}/{falta_days}/{incom_days}", "Cumplimiento diario")
+            else:
+                kpi_card("Alertas", f"{inc}", "Días sin pares estimados")
 
         if fixes_applied:
             st.markdown(f"""<div class="pill">Correcciones aplicadas: {fixes_applied}</div>""", unsafe_allow_html=True)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        # Gráfico del empleado: horas por día
-        if not daily_emp.empty:
-            chart_emp = daily_emp.copy()
-            chart_emp = chart_emp.sort_values("Fecha")
-            chart_emp["Horas_float"] = chart_emp["Minutos"] / 60.0
-            st.markdown("### Horas por día (empleado)")
-            st.bar_chart(chart_emp.set_index("Fecha")[["Horas_float"]], height=230)
+        # Gráficos empleado
+        ch = daily_emp.sort_values("Fecha").copy()
+        ch["Horas_float"] = ch["Minutos"] / 60.0
+
+        st.markdown("### Horas por día (empleado)")
+        st.bar_chart(ch.set_index("Fecha")[["Horas_float"]], height=240)
+
+        if tipo == "NO Docente":
+            st.markdown("### Saldo por día (NO Docente)")
+            saldo_df = ch[["Fecha", "Saldo_min"]].copy()
+            saldo_df["Saldo_horas"] = saldo_df["Saldo_min"] / 60.0
+            st.bar_chart(saldo_df.set_index("Fecha")[["Saldo_horas"]], height=220)
+
+        st.markdown("### Marcaciones por día")
+        marc_df = ch[["Fecha", "Marcaciones"]].set_index("Fecha")
+        st.bar_chart(marc_df[["Marcaciones"]], height=220)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         # Tabla día a día
         st.dataframe(employee_detail_table(daily_emp), use_container_width=True, height=520)
 
-        # Export SOLO empleado (incluye KPIs + diario + marcaciones)
+        # Export empleado
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         kpi_block = {
@@ -592,12 +690,17 @@ def main() -> None:
             "Dias": dias,
             "Total": minutes_to_hhmm(total_min),
             "Prom_dia": minutes_to_hhmm(prom),
+            "Marcaciones_total": marc_total,
+            "Marcaciones_prom_dia": round(marc_prom, 2),
             "Incompletos": inc,
             "Cortes": cuts,
+            "Max_dia": minutes_to_hhmm(max_day),
+            "Min_dia": minutes_to_hhmm(min_day),
             "Cumplimiento_NO_Docente": pct if tipo == "NO Docente" else "",
             "Extras_mes_NO_Docente": minutes_to_hhmm(extras_min) if tipo == "NO Docente" else "",
             "Faltas_mes_NO_Docente": minutes_to_hhmm(faltas_min) if tipo == "NO Docente" else "",
-            "Saldo_acumulado_NO_Docente": delta_short(saldo_sum) if tipo == "NO Docente" else "",
+            "Saldo_neto_NO_Docente": delta_short(saldo_sum) if tipo == "NO Docente" else "",
+            "Dias_OK_FALTA_INCOMP": f"{ok_days}/{falta_days}/{incom_days}" if tipo == "NO Docente" else "",
             "Correcciones_aplicadas": fixes_applied,
         }
 
@@ -627,7 +730,7 @@ def main() -> None:
         edited = st.data_editor(
             st.session_state["profiles"],
             use_container_width=True,
-            height=520,
+            height=560,
             hide_index=True,
             column_config={
                 "Tipo": st.column_config.SelectboxColumn("Tipo", options=["NO Docente", "Docente"], required=True)
