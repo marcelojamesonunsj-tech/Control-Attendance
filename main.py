@@ -261,6 +261,38 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
 
 
 # =========================
+# Corrección masiva NO Docente (TODOS)
+# =========================
+def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
+    """
+    Corrección masiva para TODOS los NO Docentes:
+    - Para cada empleado NO Docente, agrega marca faltante en días con 1 sola marca.
+    Devuelve (raw_corregido, total_correcciones)
+    """
+    if raw.empty:
+        return raw, 0
+
+    docentes = raw[raw["Tipo"] == "Docente"].copy()
+    nodoc = raw[raw["Tipo"] == "NO Docente"].copy()
+
+    if nodoc.empty:
+        return raw, 0
+
+    fixed_parts = []
+    total_fixes = 0
+
+    for (dni, emp), g in nodoc.groupby(["DNI", "Empleado"]):
+        corrected, nfix = correct_missing_punches_for_employee(g.copy(), expected_nodoc)
+        fixed_parts.append(corrected)
+        total_fixes += nfix
+
+    nodoc_fixed = pd.concat(fixed_parts, ignore_index=True) if fixed_parts else nodoc
+    out = pd.concat([docentes, nodoc_fixed], ignore_index=True)
+    out = out.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
+    return out, total_fixes
+
+
+# =========================
 # KPIs / Summary
 # =========================
 def summarize(daily: pd.DataFrame) -> pd.DataFrame:
@@ -382,6 +414,41 @@ def histogram_hours(series_minutes: pd.Series, bin_hours: list[tuple[float, floa
 
 
 # =========================
+# Tabla: Extras por empleado (NO Docente)
+# =========================
+def extras_table(daily: pd.DataFrame) -> pd.DataFrame:
+    nod = daily[daily["Tipo"] == "NO Docente"].copy()
+    if nod.empty:
+        return pd.DataFrame(columns=[
+            "Empleado", "DNI", "Dias", "Incompletos",
+            "Extras (HH:MM)", "Extras (min)",
+            "Faltas (HH:MM)", "Faltas (min)",
+            "Saldo neto"
+        ])
+
+    g = nod.groupby(["Empleado", "DNI"], as_index=False).agg(
+        Dias=("Fecha", "nunique"),
+        Incompletos=("Incompleto", lambda x: int((x == "SI").sum())),
+        Extras_min=("Saldo_min", lambda x: int(x[x > 0].sum())),
+        Faltas_min=("Saldo_min", lambda x: int((-x[x < 0]).sum())),
+        Saldo_min=("Saldo_min", "sum"),
+    )
+
+    g["Extras (HH:MM)"] = g["Extras_min"].apply(minutes_to_hhmm)
+    g["Faltas (HH:MM)"] = g["Faltas_min"].apply(minutes_to_hhmm)
+    g["Saldo neto"] = g["Saldo_min"].apply(delta_short)
+
+    g = g.sort_values(["Extras_min", "Saldo_min"], ascending=False).reset_index(drop=True)
+
+    return g[
+        ["Empleado", "DNI", "Dias", "Incompletos",
+         "Extras (HH:MM)", "Extras_min",
+         "Faltas (HH:MM)", "Faltas_min",
+         "Saldo neto"]
+    ].rename(columns={"Extras_min": "Extras (min)", "Faltas_min": "Faltas (min)"})
+
+
+# =========================
 # App
 # =========================
 def main() -> None:
@@ -418,6 +485,19 @@ def main() -> None:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         raw = apply_profiles(raw0, st.session_state["profiles"])
+
+        # Botón masivo: corrige faltas de marcación (TODOS)
+        left, right = st.columns([1.1, 1.0])
+        with left:
+            fix_all = st.button("Corregir faltas de marcación (TODOS)", use_container_width=True)
+        with right:
+            st.markdown("""<div class="pill">Aplica SOLO a NO Docentes (días con 1 marcación)</div>""", unsafe_allow_html=True)
+
+        fixes_total = 0
+        if fix_all:
+            raw, fixes_total = correct_missing_punches_all(raw, expected)
+            st.markdown(f"""<div class="pill">Correcciones aplicadas (total): {fixes_total}</div>""", unsafe_allow_html=True)
+
         daily = calc_daily(raw, expected)
         summary = summarize(daily)
 
@@ -449,7 +529,7 @@ def main() -> None:
         doc = daily[daily["Tipo"] == "Docente"].copy()
         doc_sum = int(doc["Minutos"].sum()) if not doc.empty else 0
 
-        # KPIs en “burbujas” (2 filas)
+        # KPIs en “burbujas”
         r1 = st.columns(4)
         with r1[0]: kpi_card("Empleados", f"{empleados}", f"Días: {dias}")
         with r1[1]: kpi_card("Total", minutes_to_hhmm(total_min), f"Prom/día: {minutes_to_hhmm(prom_dia)}")
@@ -467,11 +547,15 @@ def main() -> None:
         with r3[1]: kpi_card("Faltas NO Docente", minutes_to_hhmm(nod_faltas), "Saldo negativo acumulado")
         with r3[2]: kpi_card("Saldo neto NO Docente", delta_short(nod_saldo), "Extras - faltas")
         with r3[3]:
-            # días OK/FALTA/INCOMPL (NO Docente)
             ok = int((nod["Cumple"] == "OK").sum()) if not nod.empty else 0
             fa = int((nod["Cumple"] == "FALTA").sum()) if not nod.empty else 0
             ic = int((nod["Cumple"] == "INCOMPLETO").sum()) if not nod.empty else 0
             kpi_card("NO Docente días", f"{ok}/{fa}/{ic}", "OK / FALTA / INCOMP")
+
+        # Tabla dedicada: Extras por empleado
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+        st.markdown("### Extras por empleado (NO Docente)")
+        st.dataframe(extras_table(daily), use_container_width=True, height=460)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -511,7 +595,11 @@ def main() -> None:
 
             # Incompletos por día
             st.markdown("### Incompletos por día")
-            inc_day = daily.assign(Incomp=(daily["Incompleto"] == "SI").astype(int)).groupby("Fecha", as_index=False).agg(Incompletos=("Incomp", "sum"))
+            inc_day = (
+                daily.assign(Incomp=(daily["Incompleto"] == "SI").astype(int))
+                .groupby("Fecha", as_index=False)
+                .agg(Incompletos=("Incomp", "sum"))
+            )
             inc_day = inc_day.set_index("Fecha")
             st.bar_chart(inc_day[["Incompletos"]], height=220)
 
@@ -544,7 +632,7 @@ def main() -> None:
         st.markdown("### Resumen completo")
         st.dataframe(summary, use_container_width=True, height=440)
 
-        # cache para Empleado
+        # cache para Empleado (nota: se guarda el RAW ya corregido si apretaste el botón)
         st.session_state["__raw__"] = raw
         st.session_state["__daily__"] = daily
         st.session_state["__summary__"] = summary
@@ -627,7 +715,7 @@ def main() -> None:
             faltas_min = int((-daily_emp.loc[daily_emp["Saldo_min"] < 0, "Saldo_min"].sum()))
             pct = f"{(total_min/exp_sum*100):.0f}%" if exp_sum > 0 else ""
 
-        # KPIs en burbujas (más completas)
+        # KPIs en burbujas
         r1 = st.columns(4)
         with r1[0]: kpi_card(emp, minutes_to_hhmm(total_min), f"{tipo} · DNI {dni}")
         with r1[1]: kpi_card("Días", f"{dias}", f"Prom/día: {minutes_to_hhmm(prom)}")
