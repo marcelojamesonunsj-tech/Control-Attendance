@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import re
+import json
+import html
 import pandas as pd
 import streamlit as st
 
@@ -50,6 +52,53 @@ def kpi_card(label: str, value: str, sub: str = "") -> None:
     st.markdown(
         f"""<div class="kpi"><div class="label">{label}</div><div class="value">{value}</div><div class="sub">{sub}</div></div>""",
         unsafe_allow_html=True,
+    )
+
+
+# =========================
+# Copy-to-clipboard (TSV)
+# =========================
+def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
+    """
+    Copia el DataFrame al portapapeles como TSV (ideal para pegar en Excel).
+    Funciona mejor en Chrome/Edge.
+    """
+    if df is None:
+        df = pd.DataFrame()
+
+    tsv = df.to_csv(sep="\t", index=False)
+
+    payload = {"tsv": tsv}
+    j = json.dumps(payload)
+
+    st.components.v1.html(
+        f"""
+        <div style="display:flex; gap:10px; align-items:center; margin: 8px 0 10px 0;">
+          <button id="btn_{key}" style="
+              padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.15);
+              background:rgba(255,255,255,.06); color:white; font-weight:700; cursor:pointer;
+              width: 100%;
+          ">{html.escape(label)}</button>
+          <span id="ok_{key}" style="opacity:.0; font-weight:700;">Copiado ✅</span>
+        </div>
+
+        <script>
+        const data_{key} = {j};
+        const btn_{key} = document.getElementById("btn_{key}");
+        const ok_{key} = document.getElementById("ok_{key}");
+
+        btn_{key}.addEventListener("click", async () => {{
+          try {{
+            await navigator.clipboard.writeText(data_{key}.tsv);
+            ok_{key}.style.opacity = "1";
+            setTimeout(() => ok_{key}.style.opacity = "0", 1400);
+          }} catch (e) {{
+            alert("No se pudo copiar automáticamente. Probá con Chrome/Edge o habilitá permisos de portapapeles.");
+          }}
+        }});
+        </script>
+        """,
+        height=60,
     )
 
 
@@ -108,9 +157,11 @@ def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
 
     df["FechaHora"] = pd.to_datetime(df["Estado"], errors="coerce", dayfirst=True)
     df = df.dropna(subset=["FechaHora"])
+    df = df[df["DNI"].astype(str).str.len() > 0]
 
     df["Fecha"] = df["FechaHora"].dt.date
     df = df.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
+    df["DNI"] = df["DNI"].astype(str)
     return df
 
 
@@ -137,10 +188,6 @@ def apply_profiles(raw: pd.DataFrame, profiles: pd.DataFrame) -> pd.DataFrame:
 
 
 def pair_alternating(times: list[pd.Timestamp]) -> tuple[int, int]:
-    """
-    Empareja alternando por tiempo: (t0,t1), (t2,t3)...
-    Devuelve (minutos_por_tramos, pares)
-    """
     times = [t for t in times if pd.notna(t)]
     times.sort()
     total = 0
@@ -154,10 +201,6 @@ def pair_alternating(times: list[pd.Timestamp]) -> tuple[int, int]:
 
 
 def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
-    """
-    - Docente: worked = tramos estimados (alternancia)
-    - NO Docente: worked = (última - primera) "corrido"
-    """
     rows = []
     for (dni, emp, tipo, day), g in raw.groupby(["DNI", "Empleado", "Tipo", "Fecha"], dropna=False):
         g = g.sort_values("FechaHora")
@@ -178,7 +221,6 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
 
         if tipo == "Docente":
             worked = worked_pairs
-            # Para Docente NO imponemos cumplimiento, pero sí guardamos "worked" y marcaciones.
             expected = 0
             saldo = 0
             cumple = ""
@@ -225,11 +267,6 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
 # Corrección automática NO Docente
 # =========================
 def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
-    """
-    SOLO NO Docente:
-    - Si un día tiene 1 marcación: agrega la segunda para completar expected (6/7h)
-      Regla: la única marca se toma como entrada.
-    """
     if raw_emp.empty:
         return raw_emp, 0
 
@@ -265,10 +302,6 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
 
 
 def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
-    """
-    Corrección masiva para TODOS los NO Docentes:
-    - Para cada empleado NO Docente, agrega marca faltante en días con 1 sola marca.
-    """
     if raw.empty:
         return raw, 0
 
@@ -295,11 +328,6 @@ def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple
 # KPIs / Summary
 # =========================
 def summarize(daily: pd.DataFrame) -> pd.DataFrame:
-    """
-    - Extras para NO Docente = SUM(max(0, saldo_dia))
-    - Faltas para NO Docente = SUM(max(0, -saldo_dia))
-    - Saldo neto = SUM(saldo_dia) (informativo)
-    """
     if daily.empty:
         return pd.DataFrame()
 
@@ -380,7 +408,7 @@ def employee_detail_table(daily_emp: pd.DataFrame) -> pd.DataFrame:
 
 
 # =========================
-# Export Helpers (bonito)
+# Export General Excel (bonito)
 # =========================
 def _safe_table_name(name: str) -> str:
     base = re.sub(r"[^A-Za-z0-9_]", "_", name)
@@ -427,63 +455,12 @@ def _apply_excel_style(ws, table_name: str) -> None:
         ws.column_dimensions[letter].width = min(max(10, max_len + 2), 60)
 
 
-def export_employee_excel(
-    employee_name: str,
-    dni: str,
-    tipo: str,
-    reduced: bool,
-    expected: int,
-    kpi_block: dict,
-    daily_emp: pd.DataFrame,
-    raw_emp: pd.DataFrame,
-) -> bytes:
-    out = io.BytesIO()
-    with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        cfg = pd.DataFrame([{
-            "Empleado": employee_name,
-            "DNI": str(dni),
-            "Tipo": tipo,
-            "Horario_reducido": "SI" if reduced else "NO",
-            "Esperado_NO_Docente": minutes_to_hhmm(expected) if tipo == "NO Docente" else "",
-        }])
-        cfg.to_excel(writer, sheet_name="Empleado", index=False)
-
-        pd.DataFrame([kpi_block]).to_excel(writer, sheet_name="KPIs", index=False)
-
-        daily_out = daily_emp.drop(columns=["Esperado_min", "Saldo_min"], errors="ignore").copy()
-        daily_out.to_excel(writer, sheet_name="Detalle_Diario", index=False)
-
-        raw_out = raw_emp.copy()
-        raw_out["Fecha"] = raw_out["FechaHora"].dt.date
-        raw_out["Hora"] = raw_out["FechaHora"].dt.strftime("%H:%M")
-        raw_out = raw_out.sort_values("FechaHora")[["Fecha", "Hora"]]
-        raw_out.to_excel(writer, sheet_name="Marcaciones", index=False)
-
-        for sheet in writer.book.sheetnames:
-            ws = writer.book[sheet]
-            ws.freeze_panes = "A2"
-            for col in ws.columns:
-                letter = col[0].column_letter
-                max_len = 0
-                for cell in col:
-                    v = "" if cell.value is None else str(cell.value)
-                    max_len = max(max_len, len(v))
-                ws.column_dimensions[letter].width = min(max(10, max_len + 2), 52)
-
-        # DNI como texto en la hoja Empleado
-        ws_emp = writer.book["Empleado"]
-        for cell in ws_emp["B"][1:]:
-            cell.number_format = "@"
-
-    out.seek(0)
-    return out.getvalue()
-
-
 def export_general_excel(
     reduced: bool,
     expected: int,
     kpis_general: dict,
     summary_all: pd.DataFrame,
+    extras_only: pd.DataFrame,
     daily: pd.DataFrame,
     raw: pd.DataFrame,
 ) -> bytes:
@@ -507,7 +484,6 @@ def export_general_excel(
 
         _apply_excel_style(ws, table_name=sheet_name)
 
-    # KPIs General
     df_kpis = pd.DataFrame([{
         "Horario_reducido": "SI" if reduced else "NO",
         "Esperado_NO_Docente": minutes_to_hhmm(expected),
@@ -515,13 +491,16 @@ def export_general_excel(
     }])
     add_df("KPIs_General", df_kpis)
 
-    # Resumen (todos)
     summary_out = summary_all.copy()
     if "DNI" in summary_out.columns:
         summary_out["DNI"] = summary_out["DNI"].astype(str)
     add_df("Resumen_Empleados", summary_out, text_cols={"DNI"})
 
-    # Detalle Diario
+    extras_out = extras_only.copy()
+    if not extras_out.empty and "DNI" in extras_out.columns:
+        extras_out["DNI"] = extras_out["DNI"].astype(str)
+    add_df("Solo_Extras", extras_out if not extras_out.empty else pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"]), text_cols={"DNI"})
+
     daily_out = daily.copy()
     daily_out["DNI"] = daily_out["DNI"].astype(str)
     daily_out["Fecha"] = pd.to_datetime(daily_out["Fecha"]).dt.strftime("%Y-%m-%d")
@@ -529,7 +508,6 @@ def export_general_excel(
     daily_out["Ultima"] = pd.to_datetime(daily_out["Ultima"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
     add_df("Detalle_Diario", daily_out, text_cols={"DNI"})
 
-    # Marcaciones
     raw_out = raw.copy()
     raw_out["DNI"] = raw_out["DNI"].astype(str)
     raw_out["Fecha"] = pd.to_datetime(raw_out["FechaHora"]).dt.strftime("%Y-%m-%d")
@@ -537,33 +515,6 @@ def export_general_excel(
     raw_out = raw_out.sort_values(["Empleado", "DNI", "FechaHora"])[["Empleado", "DNI", "Tipo", "Fecha", "Hora"]]
     add_df("Marcaciones", raw_out, text_cols={"DNI"})
 
-    out = io.BytesIO()
-    wb.save(out)
-    out.seek(0)
-    return out.getvalue()
-
-
-def export_extras_only_excel(extras_df: pd.DataFrame) -> bytes:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Extras"
-
-    if extras_df.empty:
-        extras_df = pd.DataFrame(columns=["Empleado", "DNI", "Horas_extras", "Extras_min"])
-
-    # Header
-    for j, col in enumerate(extras_df.columns, start=1):
-        ws.cell(row=1, column=j, value=str(col))
-
-    # Rows
-    for i, row in enumerate(extras_df.itertuples(index=False), start=2):
-        for j, val in enumerate(row, start=1):
-            cell = ws.cell(row=i, column=j, value=val)
-            if extras_df.columns[j - 1] == "DNI":
-                cell.value = str(val)
-                cell.number_format = "@"
-
-    _apply_excel_style(ws, table_name="Extras")
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
@@ -630,7 +581,6 @@ def main() -> None:
 
         raw = apply_profiles(raw0, st.session_state["profiles"])
 
-        # Botón masivo
         left, right = st.columns([1.1, 1.0])
         with left:
             fix_all = st.button("Corregir faltas de marcación (TODOS)", use_container_width=True)
@@ -645,7 +595,6 @@ def main() -> None:
         daily = calc_daily(raw, expected)
         summary = summarize(daily)
 
-        # Global KPIs
         total_min = int(daily["Minutos"].sum()) if not daily.empty else 0
         empleados = int(summary.shape[0]) if not summary.empty else 0
         dias = int(daily["Fecha"].nunique()) if not daily.empty else 0
@@ -672,7 +621,6 @@ def main() -> None:
         doc = daily[daily["Tipo"] == "Docente"].copy()
         doc_sum = int(doc["Minutos"].sum()) if not doc.empty else 0
 
-        # KPIs burbujas
         r1 = st.columns(4)
         with r1[0]: kpi_card("Empleados", f"{empleados}", f"Días: {dias}")
         with r1[1]: kpi_card("Total", minutes_to_hhmm(total_min), f"Prom/día: {minutes_to_hhmm(prom_dia)}")
@@ -696,34 +644,27 @@ def main() -> None:
             kpi_card("NO Docente días", f"{ok}/{fa}/{ic}", "OK / FALTA / INCOMP")
 
         # =======================
-        # SOLO EXTRAS (tabla + export)
+        # SOLO EXTRAS (tabla + copiar + export dentro del export general)
         # =======================
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         extras_only = summary[summary["Tipo"] == "NO Docente"].copy()
         if not extras_only.empty:
             extras_only = (
-                extras_only[["Empleado", "DNI", "Extras", "Extras_min"]]
+                extras_only[["Empleado", "DNI", "Tipo", "Extras", "Extras_min"]]
                 .rename(columns={"Extras": "Horas_extras"})
                 .sort_values("Extras_min", ascending=False)
                 .reset_index(drop=True)
             )
-
-        extras_xlsx = export_extras_only_excel(extras_only.copy())
-
-        st.download_button(
-            "Exportar SOLO extras (Excel)",
-            data=extras_xlsx,
-            file_name="extras_empleados.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+        else:
+            extras_only = pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"])
 
         st.markdown("### Solo extras (NO Docente)")
-        st.table(extras_only if not extras_only.empty else pd.DataFrame(columns=["Empleado", "DNI", "Horas_extras", "Extras_min"]))
+        copy_table_button(extras_only, "Copiar SOLO EXTRAS (pegar en Excel)", key="copy_extras")
+        st.table(extras_only)
 
         # =======================
-        # Export GENERAL (Excel)
+        # Export GENERAL (Excel bonito)
         # =======================
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -746,6 +687,7 @@ def main() -> None:
             expected=expected,
             kpis_general=kpis_general,
             summary_all=summary.copy(),
+            extras_only=extras_only.copy(),
             daily=daily.copy(),
             raw=raw.copy(),
         )
@@ -776,8 +718,7 @@ def main() -> None:
 
             st.markdown("### Distribución (horas por día)")
             bins = [(0, 2), (2, 4), (4, 6), (6, 8), (8, 10), (10, 999)]
-            hist = histogram_hours(daily["Minutos"], bins)
-            hist = hist.set_index("Rango")
+            hist = histogram_hours(daily["Minutos"], bins).set_index("Rango")
             st.bar_chart(hist[["Días"]], height=220)
 
             st.markdown("### Top 15 empleados por horas")
@@ -788,25 +729,23 @@ def main() -> None:
                 .head(15)
             )
             top_hours["Total_horas"] = top_hours["Total_min"] / 60.0
-            top_hours = top_hours.set_index("Empleado")
-            st.bar_chart(top_hours[["Total_horas"]], height=260)
+            st.bar_chart(top_hours.set_index("Empleado")[["Total_horas"]], height=260)
 
             st.markdown("### Incompletos por día")
             inc_day = (
                 daily.assign(Incomp=(daily["Incompleto"] == "SI").astype(int))
                 .groupby("Fecha", as_index=False)
                 .agg(Incompletos=("Incomp", "sum"))
+                .set_index("Fecha")
             )
-            inc_day = inc_day.set_index("Fecha")
             st.bar_chart(inc_day[["Incompletos"]], height=220)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        # Resumen completo
         st.markdown("### Resumen completo (incluye Extras)")
+        copy_table_button(summary, "Copiar RESUMEN COMPLETO (pegar en Excel)", key="copy_summary")
         st.dataframe(summary, use_container_width=True, height=520, hide_index=True)
 
-        # cache para Empleado
         st.session_state["__raw__"] = raw
         st.session_state["__daily__"] = daily
         st.session_state["__summary__"] = summary
@@ -829,9 +768,9 @@ def main() -> None:
         disp["Display"] = disp["Empleado"] + " · " + disp["DNI"].astype(str) + " · " + disp["Tipo"]
         selected = st.selectbox("", options=disp["Display"].tolist(), label_visibility="collapsed")
         r = disp[disp["Display"] == selected].iloc[0]
-        emp, dni, tipo = r["Empleado"], r["DNI"], r["Tipo"]
+        emp, dni, tipo = r["Empleado"], str(r["DNI"]), r["Tipo"]
 
-        raw_emp = raw[(raw["Empleado"] == emp) & (raw["DNI"].astype(str) == str(dni)) & (raw["Tipo"] == tipo)].copy().sort_values("FechaHora")
+        raw_emp = raw[(raw["Empleado"] == emp) & (raw["DNI"].astype(str) == dni) & (raw["Tipo"] == tipo)].copy().sort_values("FechaHora")
 
         fix = False
         fixes_applied = 0
@@ -842,16 +781,16 @@ def main() -> None:
             corrected_raw_emp, fixes_applied = correct_missing_punches_for_employee(raw_emp, expected)
 
             raw_corrected = raw.copy()
-            mask = (raw_corrected["Empleado"] == emp) & (raw_corrected["DNI"].astype(str) == str(dni)) & (raw_corrected["Tipo"] == tipo)
+            mask = (raw_corrected["Empleado"] == emp) & (raw_corrected["DNI"].astype(str) == dni) & (raw_corrected["Tipo"] == tipo)
             raw_corrected = raw_corrected[~mask]
             raw_corrected = pd.concat([raw_corrected, corrected_raw_emp], ignore_index=True)
             raw_corrected = raw_corrected.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
 
             daily_corrected = calc_daily(raw_corrected, expected)
-            daily_emp = daily_corrected[(daily_corrected["Empleado"] == emp) & (daily_corrected["DNI"].astype(str) == str(dni)) & (daily_corrected["Tipo"] == tipo)].copy()
+            daily_emp = daily_corrected[(daily_corrected["Empleado"] == emp) & (daily_corrected["DNI"].astype(str) == dni) & (daily_corrected["Tipo"] == tipo)].copy()
             raw_emp = corrected_raw_emp
         else:
-            daily_emp = daily[(daily["Empleado"] == emp) & (daily["DNI"].astype(str) == str(dni)) & (daily["Tipo"] == tipo)].copy()
+            daily_emp = daily[(daily["Empleado"] == emp) & (daily["DNI"].astype(str) == dni) & (daily["Tipo"] == tipo)].copy()
 
         if daily_emp.empty:
             st.warning("Sin datos para este empleado.")
@@ -867,7 +806,6 @@ def main() -> None:
         marc_prom = marc_total / max(int(daily_emp.shape[0]), 1)
 
         pares_0 = int((daily_emp["Pares_estimados"] == 0).sum())
-
         max_day = int(daily_emp["Minutos"].max())
         min_day = int(daily_emp["Minutos"].min())
 
@@ -933,49 +871,10 @@ def main() -> None:
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        st.dataframe(employee_detail_table(daily_emp), use_container_width=True, height=520, hide_index=True)
-
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
-        kpi_block = {
-            "Empleado": emp,
-            "DNI": str(dni),
-            "Tipo": tipo,
-            "Horario_reducido": "SI" if reduced else "NO",
-            "Dias": dias,
-            "Total": minutes_to_hhmm(total_min),
-            "Prom_dia": minutes_to_hhmm(prom),
-            "Marcaciones_total": marc_total,
-            "Marcaciones_prom_dia": round(marc_prom, 2),
-            "Incompletos": inc,
-            "Cortes": cuts,
-            "Max_dia": minutes_to_hhmm(max_day),
-            "Min_dia": minutes_to_hhmm(min_day),
-            "Cumplimiento_NO_Docente": pct if tipo == "NO Docente" else "",
-            "Extras_mes_NO_Docente": minutes_to_hhmm(extras_min) if tipo == "NO Docente" else "",
-            "Faltas_mes_NO_Docente": minutes_to_hhmm(faltas_min) if tipo == "NO Docente" else "",
-            "Saldo_neto_NO_Docente": delta_short(saldo_sum) if tipo == "NO Docente" else "",
-            "Dias_OK_FALTA_INCOMP": f"{ok_days}/{falta_days}/{incom_days}" if tipo == "NO Docente" else "",
-            "Correcciones_aplicadas": fixes_applied,
-        }
-
-        excel_emp = export_employee_excel(
-            employee_name=emp,
-            dni=str(dni),
-            tipo=tipo,
-            reduced=reduced,
-            expected=expected,
-            kpi_block=kpi_block,
-            daily_emp=daily_emp,
-            raw_emp=raw_emp,
-        )
-        st.download_button(
-            "Exportar empleado (KPIs + diario + marcaciones)",
-            data=excel_emp,
-            file_name=f"empleado_{emp.replace(' ', '_')}_{dni}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+        det = employee_detail_table(daily_emp)
+        st.markdown("### Detalle día a día (empleado)")
+        copy_table_button(det, "Copiar DETALLE DÍA A DÍA (pegar en Excel)", key="copy_emp_detail")
+        st.dataframe(det, use_container_width=True, height=520, hide_index=True)
 
     # =======================
     # PERFILES
