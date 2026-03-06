@@ -4,6 +4,7 @@ import io
 import re
 import json
 import html
+import unicodedata
 import pandas as pd
 import streamlit as st
 
@@ -13,7 +14,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 
-REQUIRED_COLS = ["Nombre", "Marc.", "Estado", "NvoEstado"]
+REQUIRED_COLS = ["Estado"]
+OPTIONAL_COLS = ["Nombre", "Marc.", "NvoEstado"]
 
 
 # =========================
@@ -23,26 +25,217 @@ def inject_css() -> None:
     st.markdown(
         """
         <style>
-        .block-container { max-width: 1380px; padding-top: 1rem; padding-bottom: 1.4rem; }
+        :root{
+            --unsj-blue-1:#003B8E;
+            --unsj-blue-2:#0A58CA;
+            --unsj-blue-3:#6BB8FF;
+            --glass-bg: rgba(255,255,255,.10);
+            --glass-bg-2: rgba(255,255,255,.06);
+            --glass-br: rgba(255,255,255,.16);
+            --txt: #F7FBFF;
+            --txt-soft: rgba(247,251,255,.78);
+            --shadow: 0 12px 40px rgba(0,0,0,.22);
+        }
+
+        html, body, [class*="css"]  {
+            color: var(--txt);
+        }
+
+        .stApp {
+            background:
+                radial-gradient(circle at 12% 18%, rgba(107,184,255,.24), transparent 28%),
+                radial-gradient(circle at 85% 16%, rgba(10,88,202,.25), transparent 24%),
+                radial-gradient(circle at 80% 80%, rgba(0,59,142,.22), transparent 28%),
+                linear-gradient(135deg, #031329 0%, #062042 38%, #09305f 68%, #0b3f79 100%);
+        }
+
+        .block-container {
+            max-width: 1420px;
+            padding-top: 1.10rem;
+            padding-bottom: 1.6rem;
+        }
+
         header, footer {visibility: hidden;}
         div[data-testid="stToolbar"] {visibility: hidden; height: 0px;}
 
-        .kpi {
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 18px;
-            padding: 14px 14px;
-            background: rgba(255,255,255,0.03);
+        .hero-title {
+            font-size: 2.15rem;
+            font-weight: 900;
+            letter-spacing: .2px;
+            margin-bottom: .15rem;
+            line-height: 1.05;
+            color: #F4FAFF;
+            text-shadow: 0 3px 18px rgba(0,0,0,.18);
         }
-        .kpi .label {opacity:.78; font-size:.92rem;}
-        .kpi .value {font-size:1.65rem; font-weight:900; line-height:1.1;}
-        .kpi .sub {opacity:.70; font-size:.86rem; margin-top:.18rem;}
 
-        .pill {display:inline-block; padding:6px 10px; border-radius:999px;
-               border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.03);
-               font-size:.85rem; opacity:.92;}
+        .hero-sub {
+            color: rgba(255,255,255,.76);
+            font-size: .98rem;
+            margin-top: .1rem;
+        }
 
-        .hr {height:1px; background: rgba(255,255,255,0.08); margin: 0.9rem 0 1.0rem 0;}
+        .glass-wrap {
+            background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.06));
+            border: 1px solid rgba(255,255,255,.14);
+            border-radius: 24px;
+            padding: 16px 18px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+        }
+
+        .kpi {
+            border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 22px;
+            padding: 16px 16px;
+            min-height: 108px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.05));
+            box-shadow: 0 10px 30px rgba(0,0,0,.16);
+            backdrop-filter: blur(14px) saturate(155%);
+            -webkit-backdrop-filter: blur(14px) saturate(155%);
+        }
+        .kpi .label {
+            opacity:.82;
+            font-size:.92rem;
+            font-weight: 600;
+            color: rgba(255,255,255,.80);
+        }
+        .kpi .value {
+            font-size:1.72rem;
+            font-weight:900;
+            line-height:1.08;
+            margin-top: 6px;
+            color:#FFFFFF;
+        }
+        .kpi .sub {
+            opacity:.75;
+            font-size:.86rem;
+            margin-top:.28rem;
+            color: rgba(255,255,255,.72);
+        }
+
+        .pill {
+            display:inline-block;
+            padding:8px 12px;
+            border-radius:999px;
+            border:1px solid rgba(255,255,255,.16);
+            background:linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.05));
+            font-size:.86rem;
+            color: rgba(255,255,255,.90);
+            box-shadow: 0 8px 24px rgba(0,0,0,.14);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        .hr {
+            height:1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,.22), transparent);
+            margin: 1rem 0 1.10rem 0;
+        }
+
+        div[data-testid="stFileUploader"] > section,
+        div[data-testid="stDataFrame"],
+        div[data-testid="stTable"],
+        div[data-testid="stDataEditor"],
+        div[data-testid="stMetric"],
+        div[data-testid="stVerticalBlockBorderWrapper"],
+        div[data-testid="stAlert"] {
+            border-radius: 22px !important;
+        }
+
+        div[data-testid="stFileUploader"] > section {
+            background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05)) !important;
+            border: 1px solid rgba(255,255,255,.14) !important;
+            box-shadow: 0 10px 28px rgba(0,0,0,.15) !important;
+            backdrop-filter: blur(16px) saturate(160%);
+            -webkit-backdrop-filter: blur(16px) saturate(160%);
+        }
+
+        .stButton > button,
+        .stDownloadButton > button {
+            width: 100%;
+            border-radius: 16px !important;
+            border: 1px solid rgba(255,255,255,.16) !important;
+            background:
+                linear-gradient(180deg, rgba(107,184,255,.22), rgba(10,88,202,.16)) !important;
+            color: white !important;
+            font-weight: 800 !important;
+            min-height: 46px !important;
+            box-shadow: 0 10px 24px rgba(0,0,0,.18) !important;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        .stButton > button:hover,
+        .stDownloadButton > button:hover {
+            border-color: rgba(255,255,255,.24) !important;
+            transform: translateY(-1px);
+            box-shadow: 0 14px 28px rgba(0,0,0,.22) !important;
+        }
+
+        div[data-baseweb="select"] > div,
+        .stTextInput > div > div > input {
+            background: rgba(255,255,255,.08) !important;
+            border: 1px solid rgba(255,255,255,.15) !important;
+            border-radius: 14px !important;
+            color: white !important;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        div[data-baseweb="tab-list"] {
+            gap: 10px;
+            background: transparent !important;
+        }
+
+        button[data-baseweb="tab"] {
+            border-radius: 16px !important;
+            padding: 10px 18px !important;
+            background: rgba(255,255,255,.06) !important;
+            border: 1px solid rgba(255,255,255,.12) !important;
+            color: rgba(255,255,255,.88) !important;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        button[data-baseweb="tab"][aria-selected="true"] {
+            background: linear-gradient(180deg, rgba(107,184,255,.22), rgba(10,88,202,.15)) !important;
+            border-color: rgba(255,255,255,.20) !important;
+            color: #fff !important;
+            box-shadow: 0 10px 24px rgba(0,0,0,.16);
+        }
+
+        [data-testid="stDataFrame"] > div,
+        [data-testid="stDataEditor"] > div {
+            background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05)) !important;
+            border: 1px solid rgba(255,255,255,.14) !important;
+            box-shadow: 0 10px 28px rgba(0,0,0,.15) !important;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        .st-emotion-cache-1v0mbdj img,
+        .st-emotion-cache-ocqkz7 {
+            border-radius: 18px !important;
+        }
+
+        [data-testid="stMarkdownContainer"] p {
+            color: rgba(255,255,255,.88);
+        }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def hero_header() -> None:
+    st.markdown(
+        """
+        <div class="glass-wrap" style="margin-bottom:14px;">
+            <div class="hero-title">NEXO · Asistencia RRHH</div>
+            <div class="hero-sub">Liquid Glass · azul UNSJ · cálculo robusto de asistencia, faltas y horas extra</div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -50,7 +243,21 @@ def inject_css() -> None:
 
 def kpi_card(label: str, value: str, sub: str = "") -> None:
     st.markdown(
-        f"""<div class="kpi"><div class="label">{label}</div><div class="value">{value}</div><div class="sub">{sub}</div></div>""",
+        f"""<div class="kpi"><div class="label">{label}</div><div class="value">{label if False else value}</div><div class="sub">{sub}</div></div>""",
+        unsafe_allow_html=True,
+    )
+    # Ojo: el label correcto va arriba
+    st.markdown(
+        f"""
+        <script>
+        const cards = window.parent.document.querySelectorAll('.kpi');
+        const last = cards[cards.length - 1];
+        if (last) {{
+            const lbl = last.querySelector('.label');
+            if (lbl) lbl.innerText = {json.dumps(label)};
+        }}
+        </script>
+        """,
         unsafe_allow_html=True,
     )
 
@@ -59,15 +266,10 @@ def kpi_card(label: str, value: str, sub: str = "") -> None:
 # Copy-to-clipboard (TSV)
 # =========================
 def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
-    """
-    Copia el DataFrame al portapapeles como TSV (ideal para pegar en Excel).
-    Funciona mejor en Chrome/Edge.
-    """
     if df is None:
         df = pd.DataFrame()
 
     tsv = df.to_csv(sep="\t", index=False)
-
     payload = {"tsv": tsv}
     j = json.dumps(payload)
 
@@ -75,11 +277,13 @@ def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
         f"""
         <div style="display:flex; gap:10px; align-items:center; margin: 8px 0 10px 0;">
           <button id="btn_{key}" style="
-              padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.15);
-              background:rgba(255,255,255,.06); color:white; font-weight:700; cursor:pointer;
-              width: 100%;
+              padding:12px 14px; border-radius:16px; border:1px solid rgba(255,255,255,.16);
+              background:linear-gradient(180deg, rgba(107,184,255,.22), rgba(10,88,202,.16));
+              color:white; font-weight:800; cursor:pointer; width:100%;
+              box-shadow:0 10px 24px rgba(0,0,0,.18);
+              backdrop-filter: blur(14px);
           ">{html.escape(label)}</button>
-          <span id="ok_{key}" style="opacity:.0; font-weight:700;">Copiado ✅</span>
+          <span id="ok_{key}" style="opacity:.0; font-weight:800; color:white;">Copiado ✅</span>
         </div>
 
         <script>
@@ -98,7 +302,7 @@ def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
         }});
         </script>
         """,
-        height=60,
+        height=66,
     )
 
 
@@ -122,6 +326,19 @@ def delta_short(mins: int) -> str:
     return f"{sign}{h}h {m:02d}m" if sign else f"{h}h {m:02d}m"
 
 
+def normalize_text_key(value: str) -> str:
+    value = str(value or "").strip().upper()
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def display_dni(value: str) -> str:
+    v = str(value or "").strip()
+    return v if v else "SIN DNI"
+
+
 def read_excel_auto(file) -> pd.DataFrame:
     try:
         return pd.read_excel(file)
@@ -134,39 +351,97 @@ def read_excel_auto(file) -> pd.DataFrame:
             return pd.read_excel(file, engine="xlrd")
 
 
-def validate_format(df: pd.DataFrame) -> None:
+def validate_format(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
-    missing = [c for c in REQUIRED_COLS if c not in df.columns]
-    if missing:
-        raise ValueError(f"Formato incorrecto del reloj. Faltan columnas: {', '.join(missing)}")
+
+    missing_required = [c for c in REQUIRED_COLS if c not in df.columns]
+    if missing_required:
+        raise ValueError(f"Formato incorrecto del reloj. Falta la columna obligatoria: {', '.join(missing_required)}")
+
+    for col in OPTIONAL_COLS:
+        if col not in df.columns:
+            df[col] = ""
+
+    return df
 
 
 def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Tu Excel fijo:
-    - Nombre = DNI
-    - Marc.  = Apellido, Nombre
-    - Estado = dd/mm/yyyy HH:MM
-    - NvoEstado = no confiamos (a veces todo queda como entrada)
+    Reglas nuevas:
+    - Solo exigimos 'Estado'
+    - Si falta DNI, procesamos por nombre
+    - Si falta nombre, procesamos por DNI
+    - Si faltan ambos, igual no explota: genera identificador interno
     """
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
-    df["DNI"] = df["Nombre"].astype(str).str.replace(r"\D", "", regex=True).str.strip()
-    df["Empleado"] = df["Marc."].astype(str).str.strip()
+    for col in ["Nombre", "Marc.", "Estado", "NvoEstado"]:
+        if col not in df.columns:
+            df[col] = ""
+
+    df["__rowid__"] = range(1, len(df) + 1)
+
+    df["DNI"] = (
+        df["Nombre"]
+        .fillna("")
+        .astype(str)
+        .str.replace(r"\D", "", regex=True)
+        .str.strip()
+    )
+
+    df["Empleado"] = (
+        df["Marc."]
+        .fillna("")
+        .astype(str)
+        .replace({"nan": "", "None": ""})
+        .str.strip()
+    )
 
     df["FechaHora"] = pd.to_datetime(df["Estado"], errors="coerce", dayfirst=True)
-    df = df.dropna(subset=["FechaHora"])
-    df = df[df["DNI"].astype(str).str.len() > 0]
+    df = df.dropna(subset=["FechaHora"]).copy()
 
+    def resolve_employee_name(row) -> str:
+        emp = str(row["Empleado"] or "").strip()
+        dni = str(row["DNI"] or "").strip()
+        rowid = int(row["__rowid__"])
+
+        if emp:
+            return emp
+        if dni:
+            return f"SIN NOMBRE · DNI {dni}"
+        return f"SIN IDENTIFICAR · REG {rowid}"
+
+    df["Empleado"] = df.apply(resolve_employee_name, axis=1)
+
+    def resolve_employee_key(row) -> str:
+        dni = str(row["DNI"] or "").strip()
+        emp = str(row["Empleado"] or "").strip()
+        rowid = int(row["__rowid__"])
+
+        if dni:
+            return f"DNI::{dni}"
+        if emp and not emp.startswith("SIN IDENTIFICAR · REG "):
+            return f"NOMBRE::{normalize_text_key(emp)}"
+        return f"REG::{rowid}"
+
+    df["EmployeeKey"] = df.apply(resolve_employee_key, axis=1)
     df["Fecha"] = df["FechaHora"].dt.date
+
     df = df.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
     df["DNI"] = df["DNI"].astype(str)
     return df
 
 
 def init_profiles(raw: pd.DataFrame) -> pd.DataFrame:
-    base = raw[["DNI", "Empleado"]].drop_duplicates().sort_values(["Empleado", "DNI"]).reset_index(drop=True)
+    base = (
+        raw[["EmployeeKey", "DNI", "Empleado"]]
+        .drop_duplicates()
+        .sort_values(["Empleado", "DNI"])
+        .reset_index(drop=True)
+    )
+
     if "profiles" not in st.session_state:
         p = base.copy()
         p["Tipo"] = "NO Docente"
@@ -174,15 +449,15 @@ def init_profiles(raw: pd.DataFrame) -> pd.DataFrame:
         return p
 
     p = st.session_state["profiles"].copy()
-    merged = base.merge(p, on=["DNI", "Empleado"], how="left")
+    merged = base.merge(p[["EmployeeKey", "Tipo"]], on="EmployeeKey", how="left")
     merged["Tipo"] = merged["Tipo"].fillna("NO Docente")
-    merged = merged[["DNI", "Empleado", "Tipo"]]
+    merged = merged[["EmployeeKey", "DNI", "Empleado", "Tipo"]]
     st.session_state["profiles"] = merged
     return merged
 
 
 def apply_profiles(raw: pd.DataFrame, profiles: pd.DataFrame) -> pd.DataFrame:
-    m = raw.merge(profiles, on=["DNI", "Empleado"], how="left")
+    m = raw.merge(profiles[["EmployeeKey", "Tipo"]], on="EmployeeKey", how="left")
     m["Tipo"] = m["Tipo"].fillna("NO Docente")
     return m
 
@@ -202,7 +477,9 @@ def pair_alternating(times: list[pd.Timestamp]) -> tuple[int, int]:
 
 def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
     rows = []
-    for (dni, emp, tipo, day), g in raw.groupby(["DNI", "Empleado", "Tipo", "Fecha"], dropna=False):
+    for (ekey, dni, emp, tipo, day), g in raw.groupby(
+        ["EmployeeKey", "DNI", "Empleado", "Tipo", "Fecha"], dropna=False
+    ):
         g = g.sort_values("FechaHora")
         times = g["FechaHora"].tolist()
         marc = int(g.shape[0])
@@ -217,7 +494,7 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
             span = int((last - first).total_seconds() // 60)
 
         fecha_ts = pd.to_datetime(day)
-        weekday = int(fecha_ts.weekday())  # 0=Lunes ... 5=Sábado, 6=Domingo
+        weekday = int(fecha_ts.weekday())
         is_weekend = weekday >= 5
         day_type = "Fin de semana" if is_weekend else "Hábil"
 
@@ -233,8 +510,6 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
             worked = span if (marc >= 2 and pd.notna(first) and pd.notna(last)) else 0
 
             if is_weekend:
-                # Sábado y domingo:
-                # TODO lo trabajado cuenta como extra.
                 expected = 0
                 saldo = worked
                 if worked > 0 and not incompleto:
@@ -244,8 +519,6 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
                 else:
                     cumple = ""
             else:
-                # Lunes a viernes:
-                # Extra solo por encima del esperado.
                 expected = expected_nodoc if marc >= 1 else 0
                 saldo = worked - expected if expected else 0
 
@@ -258,6 +531,7 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
 
         rows.append(
             {
+                "EmployeeKey": ekey,
                 "DNI": str(dni),
                 "Empleado": emp,
                 "Tipo": tipo,
@@ -336,7 +610,7 @@ def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple
     fixed_parts = []
     total_fixes = 0
 
-    for (dni, emp), g in nodoc.groupby(["DNI", "Empleado"]):
+    for ekey, g in nodoc.groupby(["EmployeeKey"]):
         corrected, nfix = correct_missing_punches_for_employee(g.copy(), expected_nodoc)
         fixed_parts.append(corrected)
         total_fixes += nfix
@@ -361,7 +635,7 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
         return int((-x[x < 0]).sum())
 
     s = (
-        daily.groupby(["Empleado", "DNI", "Tipo"], as_index=False)
+        daily.groupby(["EmployeeKey", "Empleado", "DNI", "Tipo"], as_index=False)
         .agg(
             Dias=("Fecha", "nunique"),
             Total_min=("Minutos", "sum"),
@@ -378,27 +652,26 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
             Dias_INCOMPL=("Cumple", lambda x: int((x == "INCOMPLETO").sum())),
             Dias_EXTRA=("Cumple", lambda x: int((x == "EXTRA").sum())),
         )
-        .sort_values(["Tipo", "Empleado"])
+        .sort_values(["Tipo", "Empleado", "DNI"])
         .reset_index(drop=True)
     )
 
     s["DNI"] = s["DNI"].astype(str)
-
     s["Total"] = s["Total_min"].round().astype(int).apply(minutes_to_hhmm)
     s["Prom/día"] = s["Prom_min"].round().astype(int).apply(minutes_to_hhmm)
-
     s["Extras"] = s["Extras_min"].apply(minutes_to_hhmm)
     s["Faltas"] = s["Faltas_min"].apply(minutes_to_hhmm)
     s["Saldo"] = s["Saldo_min"].apply(delta_short)
 
     def pct_row(r):
         if r["Tipo"] == "NO Docente" and r["Esperado_min"] > 0:
-            return f"{(r['Total_min']/r['Esperado_min']*100):.0f}%"
+            return f"{(r['Total_min'] / r['Esperado_min'] * 100):.0f}%"
         return ""
 
     s["Cumplimiento"] = s.apply(pct_row, axis=1)
 
     cols = [
+        "EmployeeKey",
         "Empleado", "DNI", "Tipo",
         "Dias",
         "Total", "Total_min",
@@ -432,6 +705,24 @@ def employee_detail_table(daily_emp: pd.DataFrame) -> pd.DataFrame:
     return d[cols].sort_values("Fecha").reset_index(drop=True)
 
 
+def pretty_summary(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+    if "EmployeeKey" in out.columns:
+        out = out.drop(columns=["EmployeeKey"])
+    if "DNI" in out.columns:
+        out["DNI"] = out["DNI"].apply(display_dni)
+    return out
+
+
+def pretty_profiles(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out["DNI"] = out["DNI"].apply(display_dni)
+    return out
+
+
 # =========================
 # Export General Excel (bonito)
 # =========================
@@ -445,7 +736,7 @@ def _safe_table_name(name: str) -> str:
 
 
 def _apply_excel_style(ws, table_name: str) -> None:
-    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_fill = PatternFill("solid", fgColor="0A58CA")
     header_font = Font(bold=True, color="FFFFFF")
     for cell in ws[1]:
         cell.fill = header_fill
@@ -461,7 +752,7 @@ def _apply_excel_style(ws, table_name: str) -> None:
         ws.auto_filter.ref = ref
         tab = Table(displayName=_safe_table_name(table_name), ref=ref)
         style = TableStyleInfo(
-            name="TableStyleMedium9",
+            name="TableStyleMedium2",
             showFirstColumn=False,
             showLastColumn=False,
             showRowStripes=True,
@@ -520,26 +811,30 @@ def export_general_excel(
     summary_out = summary_all.copy()
     if "DNI" in summary_out.columns:
         summary_out["DNI"] = summary_out["DNI"].astype(str)
-    add_df("Resumen_Empleados", summary_out, text_cols={"DNI"})
+    add_df("Resumen_Empleados", summary_out, text_cols={"DNI", "EmployeeKey"})
 
     extras_out = extras_only.copy()
     if not extras_out.empty and "DNI" in extras_out.columns:
         extras_out["DNI"] = extras_out["DNI"].astype(str)
-    add_df("Solo_Extras", extras_out if not extras_out.empty else pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"]), text_cols={"DNI"})
+    add_df(
+        "Solo_Extras",
+        extras_out if not extras_out.empty else pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"]),
+        text_cols={"DNI"}
+    )
 
     daily_out = daily.copy()
     daily_out["DNI"] = daily_out["DNI"].astype(str)
     daily_out["Fecha"] = pd.to_datetime(daily_out["Fecha"]).dt.strftime("%Y-%m-%d")
     daily_out["Primera"] = pd.to_datetime(daily_out["Primera"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
     daily_out["Ultima"] = pd.to_datetime(daily_out["Ultima"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
-    add_df("Detalle_Diario", daily_out, text_cols={"DNI"})
+    add_df("Detalle_Diario", daily_out, text_cols={"DNI", "EmployeeKey"})
 
     raw_out = raw.copy()
     raw_out["DNI"] = raw_out["DNI"].astype(str)
     raw_out["Fecha"] = pd.to_datetime(raw_out["FechaHora"]).dt.strftime("%Y-%m-%d")
     raw_out["Hora"] = pd.to_datetime(raw_out["FechaHora"]).dt.strftime("%H:%M")
-    raw_out = raw_out.sort_values(["Empleado", "DNI", "FechaHora"])[["Empleado", "DNI", "Tipo", "Fecha", "Hora"]]
-    add_df("Marcaciones", raw_out, text_cols={"DNI"})
+    raw_out = raw_out.sort_values(["Empleado", "DNI", "FechaHora"])[["EmployeeKey", "Empleado", "DNI", "Tipo", "Fecha", "Hora"]]
+    add_df("Marcaciones", raw_out, text_cols={"DNI", "EmployeeKey"})
 
     out = io.BytesIO()
     wb.save(out)
@@ -548,7 +843,7 @@ def export_general_excel(
 
 
 # =========================
-# Estadísticas generales (helpers)
+# Estadísticas generales
 # =========================
 def safe_pct(a: int, b: int) -> str:
     if b <= 0:
@@ -573,26 +868,31 @@ def histogram_hours(series_minutes: pd.Series, bin_hours: list[tuple[float, floa
 # App
 # =========================
 def main() -> None:
-    st.set_page_config(page_title="Asistencia RRHH", page_icon="🕒", layout="centered")
+    st.set_page_config(page_title="NEXO · Asistencia RRHH", page_icon="🫧", layout="wide")
     inject_css()
+    hero_header()
 
-    a, b, c = st.columns([1.2, 0.9, 1.0])
+    a, b, c = st.columns([1.35, 0.90, 1.25])
     with a:
-        st.markdown("## 🕒 Asistencia RRHH")
+        st.markdown(
+            """<div class="pill">Procesa aunque falte DNI o nombre · Identificación flexible</div>""",
+            unsafe_allow_html=True,
+        )
     with b:
-        reduced = st.toggle("Activar horario reducido", value=False)
+        reduced = st.toggle("Horario reducido", value=False)
     with c:
         st.markdown(
-            f"""<div class="pill">NO Docente L-V esperado: {"06:00" if reduced else "07:00"} · Sáb/Dom: todo es extra</div>""",
+            f"""<div class="pill">NO Docente L-V esperado: {"06:00" if reduced else "07:00"} · Sáb/Dom = todo extra</div>""",
             unsafe_allow_html=True,
         )
 
     file = st.file_uploader("", type=["xlsx", "xlsm", "xls"], label_visibility="collapsed")
     if not file:
+        st.info("Subí un Excel del reloj para empezar.")
         return
 
     df0 = read_excel_auto(file)
-    validate_format(df0)
+    df0 = validate_format(df0)
     raw0 = parse_and_clean(df0)
     _ = init_profiles(raw0)
 
@@ -607,16 +907,16 @@ def main() -> None:
 
         raw = apply_profiles(raw0, st.session_state["profiles"])
 
-        left, right = st.columns([1.1, 1.0])
+        left, right = st.columns([1.10, 1.0])
         with left:
             fix_all = st.button("Corregir faltas de marcación (TODOS)", use_container_width=True)
         with right:
-            st.markdown("""<div class="pill">Aplica SOLO a NO Docentes (días con 1 marcación)</div>""", unsafe_allow_html=True)
+            st.markdown("""<div class="pill">Aplica SOLO a NO Docentes con 1 sola marcación en el día</div>""", unsafe_allow_html=True)
 
         fixes_total = 0
         if fix_all:
             raw, fixes_total = correct_missing_punches_all(raw, expected)
-            st.markdown(f"""<div class="pill">Correcciones aplicadas (total): {fixes_total}</div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="pill">Correcciones aplicadas: {fixes_total}</div>""", unsafe_allow_html=True)
 
         daily = calc_daily(raw, expected)
         summary = summarize(daily)
@@ -670,9 +970,6 @@ def main() -> None:
             ex = int((nod["Cumple"] == "EXTRA").sum()) if not nod.empty else 0
             kpi_card("NO Docente días", f"{ok}/{fa}/{ic}/{ex}", "OK / FALTA / INCOMP / EXTRA")
 
-        # =======================
-        # SOLO EXTRAS (tabla + copiar + export dentro del export general)
-        # =======================
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         extras_only = summary[summary["Tipo"] == "NO Docente"].copy()
@@ -683,6 +980,7 @@ def main() -> None:
                 .sort_values("Extras_min", ascending=False)
                 .reset_index(drop=True)
             )
+            extras_only["DNI"] = extras_only["DNI"].apply(display_dni)
         else:
             extras_only = pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"])
 
@@ -690,9 +988,6 @@ def main() -> None:
         copy_table_button(extras_only, "Copiar SOLO EXTRAS (pegar en Excel)", key="copy_extras")
         st.table(extras_only)
 
-        # =======================
-        # Export GENERAL (Excel bonito)
-        # =======================
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         kpis_general = {
@@ -729,24 +1024,23 @@ def main() -> None:
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        # Gráficos generales
         if not daily.empty:
             by_day = daily.groupby("Fecha", as_index=False).agg(Minutos=("Minutos", "sum"))
             by_day["Horas"] = by_day["Minutos"] / 60.0
             by_day = by_day.sort_values("Fecha")
 
             st.markdown("### Horas totales por día")
-            st.line_chart(by_day.set_index("Fecha")[["Horas"]], height=220)
+            st.line_chart(by_day.set_index("Fecha")[["Horas"]], height=240)
 
             by_day_tipo = daily.groupby(["Fecha", "Tipo"], as_index=False).agg(Minutos=("Minutos", "sum"))
             pivot = by_day_tipo.pivot(index="Fecha", columns="Tipo", values="Minutos").fillna(0) / 60.0
             st.markdown("### Horas por día (NO Docente vs Docente)")
-            st.area_chart(pivot, height=220)
+            st.area_chart(pivot, height=240)
 
             st.markdown("### Distribución (horas por día)")
             bins = [(0, 2), (2, 4), (4, 6), (6, 8), (8, 10), (10, 999)]
             hist = histogram_hours(daily["Minutos"], bins).set_index("Rango")
-            st.bar_chart(hist[["Días"]], height=220)
+            st.bar_chart(hist[["Días"]], height=240)
 
             st.markdown("### Top 15 empleados por horas")
             top_hours = (
@@ -755,8 +1049,9 @@ def main() -> None:
                 .sort_values("Total_min", ascending=False)
                 .head(15)
             )
+            top_hours["Empleado"] = top_hours["Empleado"].astype(str)
             top_hours["Total_horas"] = top_hours["Total_min"] / 60.0
-            st.bar_chart(top_hours.set_index("Empleado")[["Total_horas"]], height=260)
+            st.bar_chart(top_hours.set_index("Empleado")[["Total_horas"]], height=270)
 
             st.markdown("### Incompletos por día")
             inc_day = (
@@ -765,13 +1060,14 @@ def main() -> None:
                 .agg(Incompletos=("Incomp", "sum"))
                 .set_index("Fecha")
             )
-            st.bar_chart(inc_day[["Incompletos"]], height=220)
+            st.bar_chart(inc_day[["Incompletos"]], height=240)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         st.markdown("### Resumen completo (incluye Extras)")
-        copy_table_button(summary, "Copiar RESUMEN COMPLETO (pegar en Excel)", key="copy_summary")
-        st.dataframe(summary, use_container_width=True, height=520, hide_index=True)
+        summary_show = pretty_summary(summary)
+        copy_table_button(summary_show, "Copiar RESUMEN COMPLETO (pegar en Excel)", key="copy_summary")
+        st.dataframe(summary_show, use_container_width=True, height=560, hide_index=True)
 
         st.session_state["__raw__"] = raw
         st.session_state["__daily__"] = daily
@@ -792,12 +1088,22 @@ def main() -> None:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         disp = summary.copy()
-        disp["Display"] = disp["Empleado"] + " · " + disp["DNI"].astype(str) + " · " + disp["Tipo"]
+        disp["Display"] = (
+            disp["Empleado"].astype(str)
+            + " · "
+            + disp["DNI"].apply(display_dni)
+            + " · "
+            + disp["Tipo"].astype(str)
+        )
         selected = st.selectbox("", options=disp["Display"].tolist(), label_visibility="collapsed")
         r = disp[disp["Display"] == selected].iloc[0]
-        emp, dni, tipo = r["Empleado"], str(r["DNI"]), r["Tipo"]
 
-        raw_emp = raw[(raw["Empleado"] == emp) & (raw["DNI"].astype(str) == dni) & (raw["Tipo"] == tipo)].copy().sort_values("FechaHora")
+        ekey = r["EmployeeKey"]
+        emp = r["Empleado"]
+        dni = str(r["DNI"])
+        tipo = r["Tipo"]
+
+        raw_emp = raw[(raw["EmployeeKey"] == ekey) & (raw["Tipo"] == tipo)].copy().sort_values("FechaHora")
 
         fix = False
         fixes_applied = 0
@@ -808,16 +1114,16 @@ def main() -> None:
             corrected_raw_emp, fixes_applied = correct_missing_punches_for_employee(raw_emp, expected)
 
             raw_corrected = raw.copy()
-            mask = (raw_corrected["Empleado"] == emp) & (raw_corrected["DNI"].astype(str) == dni) & (raw_corrected["Tipo"] == tipo)
+            mask = (raw_corrected["EmployeeKey"] == ekey) & (raw_corrected["Tipo"] == tipo)
             raw_corrected = raw_corrected[~mask]
             raw_corrected = pd.concat([raw_corrected, corrected_raw_emp], ignore_index=True)
             raw_corrected = raw_corrected.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
 
             daily_corrected = calc_daily(raw_corrected, expected)
-            daily_emp = daily_corrected[(daily_corrected["Empleado"] == emp) & (daily_corrected["DNI"].astype(str) == dni) & (daily_corrected["Tipo"] == tipo)].copy()
+            daily_emp = daily_corrected[(daily_corrected["EmployeeKey"] == ekey) & (daily_corrected["Tipo"] == tipo)].copy()
             raw_emp = corrected_raw_emp
         else:
-            daily_emp = daily[(daily["Empleado"] == emp) & (daily["DNI"].astype(str) == dni) & (daily["Tipo"] == tipo)].copy()
+            daily_emp = daily[(daily["EmployeeKey"] == ekey) & (daily["Tipo"] == tipo)].copy()
 
         if daily_emp.empty:
             st.warning("Sin datos para este empleado.")
@@ -850,10 +1156,10 @@ def main() -> None:
         if tipo == "NO Docente":
             extras_min = int(daily_emp.loc[daily_emp["Saldo_min"] > 0, "Saldo_min"].sum())
             faltas_min = int((-daily_emp.loc[daily_emp["Saldo_min"] < 0, "Saldo_min"].sum()))
-            pct = f"{(total_min/exp_sum*100):.0f}%" if exp_sum > 0 else ""
+            pct = f"{(total_min / exp_sum * 100):.0f}%" if exp_sum > 0 else ""
 
         r1 = st.columns(4)
-        with r1[0]: kpi_card(emp, minutes_to_hhmm(total_min), f"{tipo} · DNI {dni}")
+        with r1[0]: kpi_card(emp, minutes_to_hhmm(total_min), f"{tipo} · {display_dni(dni)}")
         with r1[1]: kpi_card("Días", f"{dias}", f"Prom/día: {minutes_to_hhmm(prom)}")
         with r1[2]: kpi_card("Marcaciones", f"{marc_total}", f"Prom/día: {marc_prom:.2f} · Pares=0: {pares_0}")
         with r1[3]:
@@ -885,42 +1191,53 @@ def main() -> None:
         ch["Horas_float"] = ch["Minutos"] / 60.0
 
         st.markdown("### Horas por día (empleado)")
-        st.bar_chart(ch.set_index("Fecha")[["Horas_float"]], height=240)
+        st.bar_chart(ch.set_index("Fecha")[["Horas_float"]], height=250)
 
         if tipo == "NO Docente":
             st.markdown("### Saldo por día (NO Docente)")
             saldo_df = ch[["Fecha", "Saldo_min"]].copy()
             saldo_df["Saldo_horas"] = saldo_df["Saldo_min"] / 60.0
-            st.bar_chart(saldo_df.set_index("Fecha")[["Saldo_horas"]], height=220)
+            st.bar_chart(saldo_df.set_index("Fecha")[["Saldo_horas"]], height=230)
 
         st.markdown("### Marcaciones por día")
         marc_df = ch[["Fecha", "Marcaciones"]].set_index("Fecha")
-        st.bar_chart(marc_df[["Marcaciones"]], height=220)
+        st.bar_chart(marc_df[["Marcaciones"]], height=230)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         det = employee_detail_table(daily_emp)
         st.markdown("### Detalle día a día (empleado)")
         copy_table_button(det, "Copiar DETALLE DÍA A DÍA (pegar en Excel)", key="copy_emp_detail")
-        st.dataframe(det, use_container_width=True, height=520, hide_index=True)
+        st.dataframe(det, use_container_width=True, height=560, hide_index=True)
 
     # =======================
     # PERFILES
     # =======================
     with tabs[2]:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        profiles_view = st.session_state["profiles"].copy()
+        profiles_view["DNI"] = profiles_view["DNI"].apply(display_dni)
+
         edited = st.data_editor(
-            st.session_state["profiles"],
+            profiles_view,
             use_container_width=True,
-            height=560,
+            height=600,
             hide_index=True,
+            disabled=["EmployeeKey", "DNI", "Empleado"],
             column_config={
-                "Tipo": st.column_config.SelectboxColumn("Tipo", options=["NO Docente", "Docente"], required=True)
+                "EmployeeKey": st.column_config.TextColumn("ID interno", help="Clave interna de identificación", width="medium"),
+                "DNI": st.column_config.TextColumn("DNI", width="small"),
+                "Empleado": st.column_config.TextColumn("Empleado", width="large"),
+                "Tipo": st.column_config.SelectboxColumn("Tipo", options=["NO Docente", "Docente"], required=True),
             },
         )
-        st.session_state["profiles"] = edited
+
+        real_profiles = st.session_state["profiles"].copy()
+        real_profiles["Tipo"] = edited["Tipo"]
+        st.session_state["profiles"] = real_profiles
 
 
 if __name__ == "__main__":
     main()
-
+    
