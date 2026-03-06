@@ -216,6 +216,11 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
         if pd.notna(first) and pd.notna(last) and last >= first:
             span = int((last - first).total_seconds() // 60)
 
+        fecha_ts = pd.to_datetime(day)
+        weekday = int(fecha_ts.weekday())  # 0=Lunes ... 5=Sábado, 6=Domingo
+        is_weekend = weekday >= 5
+        day_type = "Fin de semana" if is_weekend else "Hábil"
+
         incompleto = (marc < 2) if tipo == "NO Docente" else (pairs == 0)
         cortes = (pairs >= 2)
 
@@ -226,21 +231,39 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
             cumple = ""
         else:
             worked = span if (marc >= 2 and pd.notna(first) and pd.notna(last)) else 0
-            expected = expected_nodoc if marc >= 1 else 0
-            saldo = worked - expected if expected else 0
-            if expected and not incompleto:
-                cumple = "OK" if saldo >= 0 else "FALTA"
-            elif expected and incompleto:
-                cumple = "INCOMPLETO"
+
+            if is_weekend:
+                # Sábado y domingo:
+                # TODO lo trabajado cuenta como extra.
+                expected = 0
+                saldo = worked
+                if worked > 0 and not incompleto:
+                    cumple = "EXTRA"
+                elif worked > 0 and incompleto:
+                    cumple = "INCOMPLETO"
+                else:
+                    cumple = ""
             else:
-                cumple = ""
+                # Lunes a viernes:
+                # Extra solo por encima del esperado.
+                expected = expected_nodoc if marc >= 1 else 0
+                saldo = worked - expected if expected else 0
+
+                if expected and not incompleto:
+                    cumple = "OK" if saldo >= 0 else "FALTA"
+                elif expected and incompleto:
+                    cumple = "INCOMPLETO"
+                else:
+                    cumple = ""
 
         rows.append(
             {
                 "DNI": str(dni),
                 "Empleado": emp,
                 "Tipo": tipo,
-                "Fecha": pd.to_datetime(day),
+                "Fecha": fecha_ts,
+                "Tipo_dia": day_type,
+                "Es_fin_de_semana": "SI" if is_weekend else "",
                 "Primera": first,
                 "Ultima": last,
                 "Horas": minutes_to_hhmm(worked),
@@ -353,6 +376,7 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
             Dias_OK=("Cumple", lambda x: int((x == "OK").sum())),
             Dias_FALTA=("Cumple", lambda x: int((x == "FALTA").sum())),
             Dias_INCOMPL=("Cumple", lambda x: int((x == "INCOMPLETO").sum())),
+            Dias_EXTRA=("Cumple", lambda x: int((x == "EXTRA").sum())),
         )
         .sort_values(["Tipo", "Empleado"])
         .reset_index(drop=True)
@@ -387,7 +411,7 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
         "Marcaciones",
         "Incompletos",
         "Cortes",
-        "Dias_OK", "Dias_FALTA", "Dias_INCOMPL",
+        "Dias_OK", "Dias_FALTA", "Dias_INCOMPL", "Dias_EXTRA",
     ]
     cols = [c for c in cols if c in s.columns]
     return s[cols]
@@ -400,10 +424,11 @@ def employee_detail_table(daily_emp: pd.DataFrame) -> pd.DataFrame:
     d["Ultima"] = pd.to_datetime(d["Ultima"], errors="coerce").dt.strftime("%H:%M")
 
     cols = [
-        "Fecha", "Primera", "Ultima",
+        "Fecha", "Tipo_dia", "Primera", "Ultima",
         "Horas", "Esperado", "Saldo",
         "Marcaciones", "Pares_estimados", "Cortes", "Incompleto", "Cumple"
     ]
+    cols = [c for c in cols if c in d.columns]
     return d[cols].sort_values("Fecha").reset_index(drop=True)
 
 
@@ -486,7 +511,8 @@ def export_general_excel(
 
     df_kpis = pd.DataFrame([{
         "Horario_reducido": "SI" if reduced else "NO",
-        "Esperado_NO_Docente": minutes_to_hhmm(expected),
+        "Esperado_NO_Docente_LV": minutes_to_hhmm(expected),
+        "Regla_fin_de_semana": "Todo lo trabajado sábado y domingo cuenta como extra",
         **kpis_general
     }])
     add_df("KPIs_General", df_kpis)
@@ -557,7 +583,7 @@ def main() -> None:
         reduced = st.toggle("Activar horario reducido", value=False)
     with c:
         st.markdown(
-            f"""<div class="pill">NO Docente esperado: {"06:00" if reduced else "07:00"} · cálculo por tiempo</div>""",
+            f"""<div class="pill">NO Docente L-V esperado: {"06:00" if reduced else "07:00"} · Sáb/Dom: todo es extra</div>""",
             unsafe_allow_html=True,
         )
 
@@ -630,18 +656,19 @@ def main() -> None:
         r2 = st.columns(4)
         with r2[0]: kpi_card("Incompletos", f"{incompletos}", f"{safe_pct(incompletos, total_registros_dia)} de los días")
         with r2[1]: kpi_card("Cortes", f"{cortes}", f"{safe_pct(cortes, total_registros_dia)} de los días")
-        with r2[2]: kpi_card("NO Docente", minutes_to_hhmm(nod_sum), f"Cumplimiento: {nod_pct}")
+        with r2[2]: kpi_card("NO Docente", minutes_to_hhmm(nod_sum), f"Cumplimiento L-V: {nod_pct}")
         with r2[3]: kpi_card("Docente", minutes_to_hhmm(doc_sum), "Tramos estimados por tiempo")
 
         r3 = st.columns(4)
-        with r3[0]: kpi_card("Extras NO Docente", minutes_to_hhmm(nod_extras), "Solo luego de cumplir 6h/7h")
-        with r3[1]: kpi_card("Faltas NO Docente", minutes_to_hhmm(nod_faltas), "Debajo del esperado")
+        with r3[0]: kpi_card("Extras NO Docente", minutes_to_hhmm(nod_extras), "Incluye sábados y domingos completos")
+        with r3[1]: kpi_card("Faltas NO Docente", minutes_to_hhmm(nod_faltas), "Solo sobre días hábiles")
         with r3[2]: kpi_card("Saldo neto NO Docente", delta_short(nod_saldo), "Informativo")
         with r3[3]:
             ok = int((nod["Cumple"] == "OK").sum()) if not nod.empty else 0
             fa = int((nod["Cumple"] == "FALTA").sum()) if not nod.empty else 0
             ic = int((nod["Cumple"] == "INCOMPLETO").sum()) if not nod.empty else 0
-            kpi_card("NO Docente días", f"{ok}/{fa}/{ic}", "OK / FALTA / INCOMP")
+            ex = int((nod["Cumple"] == "EXTRA").sum()) if not nod.empty else 0
+            kpi_card("NO Docente días", f"{ok}/{fa}/{ic}/{ex}", "OK / FALTA / INCOMP / EXTRA")
 
         # =======================
         # SOLO EXTRAS (tabla + copiar + export dentro del export general)
@@ -676,7 +703,7 @@ def main() -> None:
             "Incompletos": incompletos,
             "Cortes": cortes,
             "NO_Docente_Total_HHMM": minutes_to_hhmm(nod_sum),
-            "NO_Docente_Cumplimiento": nod_pct,
+            "NO_Docente_Cumplimiento_LV": nod_pct,
             "NO_Docente_Extras_HHMM": minutes_to_hhmm(nod_extras),
             "NO_Docente_Faltas_HHMM": minutes_to_hhmm(nod_faltas),
             "Correcciones_masivas": fixes_total,
@@ -815,6 +842,7 @@ def main() -> None:
         ok_days = int((daily_emp["Cumple"] == "OK").sum())
         falta_days = int((daily_emp["Cumple"] == "FALTA").sum())
         incom_days = int((daily_emp["Cumple"] == "INCOMPLETO").sum())
+        extra_days = int((daily_emp["Cumple"] == "EXTRA").sum())
 
         extras_min = 0
         faltas_min = 0
@@ -830,7 +858,7 @@ def main() -> None:
         with r1[2]: kpi_card("Marcaciones", f"{marc_total}", f"Prom/día: {marc_prom:.2f} · Pares=0: {pares_0}")
         with r1[3]:
             if tipo == "NO Docente":
-                kpi_card("Extras del mes", minutes_to_hhmm(extras_min), f"Faltas: {minutes_to_hhmm(faltas_min)} · Cumpl: {pct}")
+                kpi_card("Extras del mes", minutes_to_hhmm(extras_min), f"Faltas: {minutes_to_hhmm(faltas_min)} · Cumpl. L-V: {pct}")
             else:
                 kpi_card("Total (Docente)", minutes_to_hhmm(total_min), "Por tramos estimados")
 
@@ -839,12 +867,12 @@ def main() -> None:
         with r2[1]: kpi_card("Máx / Mín día", minutes_to_hhmm(max_day), f"Mín: {minutes_to_hhmm(min_day)}")
         with r2[2]:
             if tipo == "NO Docente":
-                kpi_card("Saldo neto", delta_short(saldo_sum), "Acumulado del mes")
+                kpi_card("Saldo neto", delta_short(saldo_sum), "Acumulado del período")
             else:
                 kpi_card("Cortes", f"{cuts}", "Días con varios tramos")
         with r2[3]:
             if tipo == "NO Docente":
-                kpi_card("Días OK/FALTA/INC", f"{ok_days}/{falta_days}/{incom_days}", "Cumplimiento diario")
+                kpi_card("Días OK/FALTA/INC/EXTRA", f"{ok_days}/{falta_days}/{incom_days}/{extra_days}", "L-V / L-V / cualquier / sáb-dom")
             else:
                 kpi_card("Alertas", f"{inc}", "Días sin pares estimados")
 
@@ -895,3 +923,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
