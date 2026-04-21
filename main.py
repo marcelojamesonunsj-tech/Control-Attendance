@@ -308,8 +308,8 @@ def hero_header() -> None:
     st.markdown(
         """
         <div class="hero-wrap">
-            <div class="hero-title">CONTROL DE ASISTENCIA APP</div>
-            <div class="hero-sub">DESARROLLADA POR MARCELO JAMESON</div>
+            <div class="hero-title">CONTROL DE ASISTENCIA</div>
+            <div class="hero-sub">developed by Jameson BrickTech</div>
         </div>
         """,
         unsafe_allow_html=True,
