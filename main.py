@@ -246,7 +246,6 @@ def kpi_card(label: str, value: str, sub: str = "") -> None:
         f"""<div class="kpi"><div class="label">{label}</div><div class="value">{label if False else value}</div><div class="sub">{sub}</div></div>""",
         unsafe_allow_html=True,
     )
-    # Ojo: el label correcto va arriba
     st.markdown(
         f"""
         <script>
@@ -262,9 +261,6 @@ def kpi_card(label: str, value: str, sub: str = "") -> None:
     )
 
 
-# =========================
-# Copy-to-clipboard (TSV)
-# =========================
 def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
     if df is None:
         df = pd.DataFrame()
@@ -306,9 +302,6 @@ def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
     )
 
 
-# =========================
-# Helpers
-# =========================
 def minutes_to_hhmm(mins: int) -> str:
     mins = int(mins) if mins is not None else 0
     h = mins // 60
@@ -367,13 +360,6 @@ def validate_format(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Reglas nuevas:
-    - Solo exigimos 'Estado'
-    - Si falta DNI, procesamos por nombre
-    - Si falta nombre, procesamos por DNI
-    - Si faltan ambos, igual no explota: genera identificador interno
-    """
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
@@ -560,9 +546,6 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
     return d.sort_values(["Tipo", "Empleado", "DNI", "Fecha"]).reset_index(drop=True)
 
 
-# =========================
-# Corrección automática NO Docente
-# =========================
 def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
     if raw_emp.empty:
         return raw_emp, 0
@@ -621,9 +604,6 @@ def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple
     return out, total_fixes
 
 
-# =========================
-# KPIs / Summary
-# =========================
 def summarize(daily: pd.DataFrame) -> pd.DataFrame:
     if daily.empty:
         return pd.DataFrame()
@@ -723,9 +703,6 @@ def pretty_profiles(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# =========================
-# Export General Excel (bonito)
-# =========================
 def _safe_table_name(name: str) -> str:
     base = re.sub(r"[^A-Za-z0-9_]", "_", name)
     if not base:
@@ -842,9 +819,6 @@ def export_general_excel(
     return out.getvalue()
 
 
-# =========================
-# Estadísticas generales
-# =========================
 def safe_pct(a: int, b: int) -> str:
     if b <= 0:
         return "0%"
@@ -864,9 +838,6 @@ def histogram_hours(series_minutes: pd.Series, bin_hours: list[tuple[float, floa
     return pd.DataFrame(rows)
 
 
-# =========================
-# App
-# =========================
 def main() -> None:
     st.set_page_config(page_title="NEXO · Asistencia RRHH", page_icon="🫧", layout="wide")
     inject_css()
@@ -899,9 +870,6 @@ def main() -> None:
     expected = 360 if reduced else 420
     tabs = st.tabs(["General", "Empleado", "Perfiles"])
 
-    # =======================
-    # GENERAL
-    # =======================
     with tabs[0]:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1073,9 +1041,6 @@ def main() -> None:
         st.session_state["__daily__"] = daily
         st.session_state["__summary__"] = summary
 
-    # =======================
-    # EMPLEADO
-    # =======================
     with tabs[1]:
         raw = st.session_state.get("__raw__", None)
         daily = st.session_state.get("__daily__", None)
@@ -1210,9 +1175,6 @@ def main() -> None:
         copy_table_button(det, "Copiar DETALLE DÍA A DÍA (pegar en Excel)", key="copy_emp_detail")
         st.dataframe(det, use_container_width=True, height=560, hide_index=True)
 
-    # =======================
-    # PERFILES
-    # =======================
     with tabs[2]:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
