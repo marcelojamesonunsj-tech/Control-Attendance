@@ -5,6 +5,8 @@ import re
 import json
 import html
 import unicodedata
+from collections import defaultdict
+
 import pandas as pd
 import streamlit as st
 
@@ -26,112 +28,135 @@ def inject_css() -> None:
         """
         <style>
         :root{
-            --unsj-blue-1:#003B8E;
+            --unsj-blue-1:#002B63;
             --unsj-blue-2:#0A58CA;
-            --unsj-blue-3:#6BB8FF;
-            --glass-bg: rgba(255,255,255,.10);
-            --glass-bg-2: rgba(255,255,255,.06);
-            --glass-br: rgba(255,255,255,.16);
+            --unsj-blue-3:#79B8FF;
+            --glass-1: rgba(255,255,255,.10);
+            --glass-2: rgba(255,255,255,.05);
+            --glass-br: rgba(255,255,255,.14);
             --txt: #F7FBFF;
             --txt-soft: rgba(247,251,255,.78);
-            --shadow: 0 12px 40px rgba(0,0,0,.22);
+            --shadow: 0 14px 40px rgba(0,0,0,.22);
         }
 
-        html, body, [class*="css"]  {
+        html, body, [class*="css"] {
             color: var(--txt);
         }
 
         .stApp {
             background:
-                radial-gradient(circle at 12% 18%, rgba(107,184,255,.24), transparent 28%),
-                radial-gradient(circle at 85% 16%, rgba(10,88,202,.25), transparent 24%),
-                radial-gradient(circle at 80% 80%, rgba(0,59,142,.22), transparent 28%),
-                linear-gradient(135deg, #031329 0%, #062042 38%, #09305f 68%, #0b3f79 100%);
+                radial-gradient(circle at 14% 18%, rgba(121,184,255,.24), transparent 24%),
+                radial-gradient(circle at 85% 15%, rgba(10,88,202,.22), transparent 20%),
+                radial-gradient(circle at 78% 80%, rgba(0,43,99,.24), transparent 25%),
+                linear-gradient(135deg, #02101f 0%, #062349 38%, #0B3971 70%, #124E93 100%);
         }
 
         .block-container {
-            max-width: 1420px;
-            padding-top: 1.10rem;
-            padding-bottom: 1.6rem;
+            max-width: 1180px;
+            padding-top: 1rem;
+            padding-bottom: 1.4rem;
         }
 
         header, footer {visibility: hidden;}
         div[data-testid="stToolbar"] {visibility: hidden; height: 0px;}
 
-        .hero-title {
-            font-size: 2.15rem;
-            font-weight: 900;
-            letter-spacing: .2px;
-            margin-bottom: .15rem;
-            line-height: 1.05;
-            color: #F4FAFF;
-            text-shadow: 0 3px 18px rgba(0,0,0,.18);
-        }
-
-        .hero-sub {
-            color: rgba(255,255,255,.76);
-            font-size: .98rem;
-            margin-top: .1rem;
-        }
-
-        .glass-wrap {
-            background: linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.06));
+        .hero-wrap{
+            background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
             border: 1px solid rgba(255,255,255,.14);
-            border-radius: 24px;
-            padding: 16px 18px;
+            border-radius: 28px;
+            padding: 22px 26px;
             box-shadow: var(--shadow);
             backdrop-filter: blur(18px) saturate(160%);
             -webkit-backdrop-filter: blur(18px) saturate(160%);
+            text-align:center;
+            margin-bottom: 14px;
+        }
+
+        .hero-title{
+            font-size: 2.15rem;
+            font-weight: 900;
+            letter-spacing: .8px;
+            color: #FFFFFF;
+            line-height: 1.02;
+            text-transform: uppercase;
+        }
+
+        .hero-sub{
+            margin-top: 8px;
+            font-size: .88rem;
+            color: rgba(255,255,255,.76);
+            letter-spacing: .7px;
+            text-transform: uppercase;
+        }
+
+        .toolbar-wrap{
+            background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 24px;
+            padding: 14px 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,.18);
+            backdrop-filter: blur(16px) saturate(160%);
+            -webkit-backdrop-filter: blur(16px) saturate(160%);
+            margin-bottom: 14px;
         }
 
         .kpi {
             border: 1px solid rgba(255,255,255,0.14);
             border-radius: 22px;
             padding: 16px 16px;
-            min-height: 108px;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.05));
-            box-shadow: 0 10px 30px rgba(0,0,0,.16);
+            min-height: 110px;
+            background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
+            box-shadow: 0 10px 28px rgba(0,0,0,.16);
             backdrop-filter: blur(14px) saturate(155%);
             -webkit-backdrop-filter: blur(14px) saturate(155%);
         }
+
         .kpi .label {
-            opacity:.82;
-            font-size:.92rem;
-            font-weight: 600;
+            opacity: .82;
+            font-size: .86rem;
+            font-weight: 700;
             color: rgba(255,255,255,.80);
+            text-transform: uppercase;
+            letter-spacing: .5px;
         }
+
         .kpi .value {
-            font-size:1.72rem;
-            font-weight:900;
-            line-height:1.08;
-            margin-top: 6px;
+            font-size: 1.72rem;
+            font-weight: 900;
+            line-height: 1.06;
+            margin-top: 8px;
             color:#FFFFFF;
+            text-transform: uppercase;
         }
+
         .kpi .sub {
-            opacity:.75;
-            font-size:.86rem;
-            margin-top:.28rem;
+            opacity: .72;
+            font-size: .82rem;
+            margin-top: .35rem;
             color: rgba(255,255,255,.72);
+            text-transform: uppercase;
+            letter-spacing: .35px;
         }
 
         .pill {
             display:inline-block;
             padding:8px 12px;
             border-radius:999px;
-            border:1px solid rgba(255,255,255,.16);
-            background:linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.05));
-            font-size:.86rem;
-            color: rgba(255,255,255,.90);
-            box-shadow: 0 8px 24px rgba(0,0,0,.14);
+            border:1px solid rgba(255,255,255,.14);
+            background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
+            font-size:.80rem;
+            color: rgba(255,255,255,.92);
+            box-shadow: 0 8px 22px rgba(0,0,0,.14);
             backdrop-filter: blur(14px);
             -webkit-backdrop-filter: blur(14px);
+            text-transform: uppercase;
+            letter-spacing: .35px;
         }
 
         .hr {
             height:1px;
             background: linear-gradient(90deg, transparent, rgba(255,255,255,.22), transparent);
-            margin: 1rem 0 1.10rem 0;
+            margin: 1rem 0 1rem 0;
         }
 
         div[data-testid="stFileUploader"] > section,
@@ -140,7 +165,8 @@ def inject_css() -> None:
         div[data-testid="stDataEditor"],
         div[data-testid="stMetric"],
         div[data-testid="stVerticalBlockBorderWrapper"],
-        div[data-testid="stAlert"] {
+        div[data-testid="stAlert"],
+        div[data-testid="stExpander"] {
             border-radius: 22px !important;
         }
 
@@ -157,14 +183,15 @@ def inject_css() -> None:
             width: 100%;
             border-radius: 16px !important;
             border: 1px solid rgba(255,255,255,.16) !important;
-            background:
-                linear-gradient(180deg, rgba(107,184,255,.22), rgba(10,88,202,.16)) !important;
+            background: linear-gradient(180deg, rgba(121,184,255,.24), rgba(10,88,202,.16)) !important;
             color: white !important;
-            font-weight: 800 !important;
+            font-weight: 900 !important;
             min-height: 46px !important;
             box-shadow: 0 10px 24px rgba(0,0,0,.18) !important;
             backdrop-filter: blur(14px);
             -webkit-backdrop-filter: blur(14px);
+            text-transform: uppercase !important;
+            letter-spacing: .4px !important;
         }
 
         .stButton > button:hover,
@@ -175,13 +202,15 @@ def inject_css() -> None:
         }
 
         div[data-baseweb="select"] > div,
-        .stTextInput > div > div > input {
+        .stTextInput > div > div > input,
+        .stTextArea textarea {
             background: rgba(255,255,255,.08) !important;
             border: 1px solid rgba(255,255,255,.15) !important;
             border-radius: 14px !important;
             color: white !important;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
+            text-transform: uppercase;
         }
 
         div[data-baseweb="tab-list"] {
@@ -197,11 +226,13 @@ def inject_css() -> None:
             color: rgba(255,255,255,.88) !important;
             backdrop-filter: blur(14px);
             -webkit-backdrop-filter: blur(14px);
+            text-transform: uppercase;
+            letter-spacing: .35px;
         }
 
         button[data-baseweb="tab"][aria-selected="true"] {
-            background: linear-gradient(180deg, rgba(107,184,255,.22), rgba(10,88,202,.15)) !important;
-            border-color: rgba(255,255,255,.20) !important;
+            background: linear-gradient(180deg, rgba(121,184,255,.24), rgba(10,88,202,.15)) !important;
+            border-color: rgba(255,255,255,.22) !important;
             color: #fff !important;
             box-shadow: 0 10px 24px rgba(0,0,0,.16);
         }
@@ -215,13 +246,15 @@ def inject_css() -> None:
             -webkit-backdrop-filter: blur(14px);
         }
 
-        .st-emotion-cache-1v0mbdj img,
-        .st-emotion-cache-ocqkz7 {
-            border-radius: 18px !important;
+        [data-testid="stMarkdownContainer"] p,
+        [data-testid="stMarkdownContainer"] li,
+        .stCaption {
+            color: rgba(255,255,255,.88);
         }
 
-        [data-testid="stMarkdownContainer"] p {
-            color: rgba(255,255,255,.88);
+        label, .st-emotion-cache-16txtl3, .st-emotion-cache-pkbazv {
+            text-transform: uppercase !important;
+            letter-spacing: .35px;
         }
         </style>
         """,
@@ -232,9 +265,9 @@ def inject_css() -> None:
 def hero_header() -> None:
     st.markdown(
         """
-        <div class="glass-wrap" style="margin-bottom:14px;">
-            <div class="hero-title">NEXO · Asistencia RRHH</div>
-            <div class="hero-sub">Liquid Glass · azul UNSJ · cálculo robusto de asistencia, faltas y horas extra</div>
+        <div class="hero-wrap">
+            <div class="hero-title">CONTROL DE ASISTENCIA APP</div>
+            <div class="hero-sub">DESARROLLADA POR MARCELO JAMESON</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -243,24 +276,20 @@ def hero_header() -> None:
 
 def kpi_card(label: str, value: str, sub: str = "") -> None:
     st.markdown(
-        f"""<div class="kpi"><div class="label">{label}</div><div class="value">{label if False else value}</div><div class="sub">{sub}</div></div>""",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
         f"""
-        <script>
-        const cards = window.parent.document.querySelectorAll('.kpi');
-        const last = cards[cards.length - 1];
-        if (last) {{
-            const lbl = last.querySelector('.label');
-            if (lbl) lbl.innerText = {json.dumps(label)};
-        }}
-        </script>
+        <div class="kpi">
+            <div class="label">{html.escape(str(label))}</div>
+            <div class="value">{html.escape(str(value))}</div>
+            <div class="sub">{html.escape(str(sub))}</div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
 
 
+# =========================
+# COPY
+# =========================
 def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
     if df is None:
         df = pd.DataFrame()
@@ -274,12 +303,13 @@ def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
         <div style="display:flex; gap:10px; align-items:center; margin: 8px 0 10px 0;">
           <button id="btn_{key}" style="
               padding:12px 14px; border-radius:16px; border:1px solid rgba(255,255,255,.16);
-              background:linear-gradient(180deg, rgba(107,184,255,.22), rgba(10,88,202,.16));
-              color:white; font-weight:800; cursor:pointer; width:100%;
+              background:linear-gradient(180deg, rgba(121,184,255,.24), rgba(10,88,202,.16));
+              color:white; font-weight:900; cursor:pointer; width:100%;
               box-shadow:0 10px 24px rgba(0,0,0,.18);
               backdrop-filter: blur(14px);
+              text-transform:uppercase; letter-spacing:.35px;
           ">{html.escape(label)}</button>
-          <span id="ok_{key}" style="opacity:.0; font-weight:800; color:white;">Copiado ✅</span>
+          <span id="ok_{key}" style="opacity:.0; font-weight:800; color:white;">COPIADO ✅</span>
         </div>
 
         <script>
@@ -302,21 +332,24 @@ def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
     )
 
 
+# =========================
+# HELPERS
+# =========================
 def minutes_to_hhmm(mins: int) -> str:
-    mins = int(mins) if mins is not None else 0
+    mins = int(round(mins)) if mins is not None else 0
     h = mins // 60
     m = mins % 60
     return f"{h:02d}:{m:02d}"
 
 
 def delta_short(mins: int) -> str:
-    mins = int(mins)
+    mins = int(round(mins))
     sign = "+" if mins > 0 else "-" if mins < 0 else ""
     mins_abs = abs(mins)
     h, m = mins_abs // 60, mins_abs % 60
     if h == 0:
-        return f"{sign}{m:02d}m" if sign else "0m"
-    return f"{sign}{h}h {m:02d}m" if sign else f"{h}h {m:02d}m"
+        return f"{sign}{m:02d}M" if sign else "0M"
+    return f"{sign}{h}H {m:02d}M" if sign else f"{h}H {m:02d}M"
 
 
 def normalize_text_key(value: str) -> str:
@@ -350,7 +383,9 @@ def validate_format(df: pd.DataFrame) -> pd.DataFrame:
 
     missing_required = [c for c in REQUIRED_COLS if c not in df.columns]
     if missing_required:
-        raise ValueError(f"Formato incorrecto del reloj. Falta la columna obligatoria: {', '.join(missing_required)}")
+        raise ValueError(
+            f"FORMATO INCORRECTO DEL RELOJ. FALTA LA COLUMNA OBLIGATORIA: {', '.join(missing_required)}"
+        )
 
     for col in OPTIONAL_COLS:
         if col not in df.columns:
@@ -448,6 +483,27 @@ def apply_profiles(raw: pd.DataFrame, profiles: pd.DataFrame) -> pd.DataFrame:
     return m
 
 
+def parse_holidays(text: str) -> set:
+    holidays = set()
+    if not text:
+        return holidays
+
+    for line in str(text).replace(",", "\n").splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        try:
+            holidays.add(pd.to_datetime(raw, dayfirst=True).date())
+        except Exception:
+            pass
+    return holidays
+
+
+def is_special_day(day, holidays: set) -> bool:
+    ts = pd.to_datetime(day)
+    return ts.weekday() >= 5 or ts.date() in holidays
+
+
 def pair_alternating(times: list[pd.Timestamp]) -> tuple[int, int]:
     times = [t for t in times if pd.notna(t)]
     times.sort()
@@ -461,8 +517,27 @@ def pair_alternating(times: list[pd.Timestamp]) -> tuple[int, int]:
     return total, pairs
 
 
-def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
+def split_interval_by_day(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Timestamp, int]]:
+    chunks = []
+    current = start
+
+    while current < end:
+        next_midnight = (current.normalize() + pd.Timedelta(days=1))
+        chunk_end = min(next_midnight, end)
+        minutes = int((chunk_end - current).total_seconds() // 60)
+        if minutes > 0:
+            chunks.append((current.normalize(), minutes))
+        current = chunk_end
+
+    return chunks
+
+
+# =========================
+# CÁLCULO NORMAL
+# =========================
+def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set) -> pd.DataFrame:
     rows = []
+
     for (ekey, dni, emp, tipo, day), g in raw.groupby(
         ["EmployeeKey", "DNI", "Empleado", "Tipo", "Fecha"], dropna=False
     ):
@@ -480,9 +555,8 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
             span = int((last - first).total_seconds() // 60)
 
         fecha_ts = pd.to_datetime(day)
-        weekday = int(fecha_ts.weekday())
-        is_weekend = weekday >= 5
-        day_type = "Fin de semana" if is_weekend else "Hábil"
+        day_is_special = is_special_day(fecha_ts.date(), holidays)
+        day_type = "FERIADO/FIN DE SEMANA" if day_is_special else "HÁBIL"
 
         incompleto = (marc < 2) if tipo == "NO Docente" else (pairs == 0)
         cortes = (pairs >= 2)
@@ -495,7 +569,7 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
         else:
             worked = span if (marc >= 2 and pd.notna(first) and pd.notna(last)) else 0
 
-            if is_weekend:
+            if day_is_special:
                 expected = 0
                 saldo = worked
                 if worked > 0 and not incompleto:
@@ -523,7 +597,7 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
                 "Tipo": tipo,
                 "Fecha": fecha_ts,
                 "Tipo_dia": day_type,
-                "Es_fin_de_semana": "SI" if is_weekend else "",
+                "Es_fin_de_semana": "SI" if day_is_special else "",
                 "Primera": first,
                 "Ultima": last,
                 "Horas": minutes_to_hhmm(worked),
@@ -546,6 +620,140 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int) -> pd.DataFrame:
     return d.sort_values(["Tipo", "Empleado", "DNI", "Fecha"]).reset_index(drop=True)
 
 
+# =========================
+# CÁLCULO CHOFERES
+# =========================
+def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set) -> pd.DataFrame:
+    rows = []
+
+    for (ekey, dni, emp, tipo), g_emp in raw.groupby(
+        ["EmployeeKey", "DNI", "Empleado", "Tipo"], dropna=False
+    ):
+        g_emp = g_emp.sort_values("FechaHora").copy()
+
+        # Docentes: mantienen lógica normal diaria
+        if tipo == "Docente":
+            g_doc = calc_daily_standard(g_emp.copy(), expected_nodoc, holidays)
+            if not g_doc.empty:
+                rows.extend(g_doc.to_dict("records"))
+            continue
+
+        times = g_emp["FechaHora"].tolist()
+
+        # Estadísticas crudas por día
+        raw_day_stats = {}
+        for day, g_day in g_emp.groupby("Fecha"):
+            g_day = g_day.sort_values("FechaHora")
+            raw_day_stats[day] = {
+                "Marcaciones": int(g_day.shape[0]),
+                "Primera": g_day["FechaHora"].iloc[0] if not g_day.empty else pd.NaT,
+                "Ultima": g_day["FechaHora"].iloc[-1] if not g_day.empty else pd.NaT,
+            }
+
+        day_worked = defaultdict(int)
+        day_expected = defaultdict(int)
+        day_pairs = defaultdict(int)
+
+        # Armado por viajes continuos (pares globales, no por día)
+        for i in range(0, len(times) - 1, 2):
+            start = times[i]
+            end = times[i + 1]
+            if pd.isna(start) or pd.isna(end) or end < start:
+                continue
+
+            remaining_normal = expected_nodoc
+            chunks = split_interval_by_day(start, end)
+
+            for day_ts, minutes in chunks:
+                day_date = day_ts.date()
+                special = is_special_day(day_date, holidays)
+
+                if special:
+                    normal_chunk = 0
+                    extra_chunk = minutes
+                else:
+                    normal_chunk = min(minutes, remaining_normal)
+                    extra_chunk = minutes - normal_chunk
+                    remaining_normal -= normal_chunk
+
+                day_worked[day_date] += minutes
+                day_expected[day_date] += normal_chunk
+                day_pairs[day_date] += 1
+
+        # Detectar marca global incompleta
+        unmatched_day = None
+        if len(times) % 2 != 0:
+            unmatched_day = pd.to_datetime(times[-1]).date()
+
+        all_days = set(raw_day_stats.keys()) | set(day_worked.keys())
+
+        for day in sorted(all_days):
+            fecha_ts = pd.to_datetime(day)
+            special = is_special_day(day, holidays)
+            day_type = "FERIADO/FIN DE SEMANA" if special else "HÁBIL"
+
+            marc = raw_day_stats.get(day, {}).get("Marcaciones", 0)
+            first = raw_day_stats.get(day, {}).get("Primera", pd.NaT)
+            last = raw_day_stats.get(day, {}).get("Ultima", pd.NaT)
+
+            worked = int(day_worked.get(day, 0))
+            expected = int(day_expected.get(day, 0))
+            saldo = worked - expected
+            pairs = int(day_pairs.get(day, 0))
+
+            incompleto = unmatched_day == day
+            cortes = marc >= 3
+
+            if incompleto:
+                cumple = "INCOMPLETO"
+            else:
+                if worked > 0 and expected == 0 and saldo > 0:
+                    cumple = "EXTRA"
+                elif expected > 0:
+                    cumple = "OK" if saldo >= 0 else "FALTA"
+                else:
+                    cumple = ""
+
+            rows.append(
+                {
+                    "EmployeeKey": ekey,
+                    "DNI": str(dni),
+                    "Empleado": emp,
+                    "Tipo": tipo,
+                    "Fecha": fecha_ts,
+                    "Tipo_dia": day_type,
+                    "Es_fin_de_semana": "SI" if special else "",
+                    "Primera": first,
+                    "Ultima": last,
+                    "Horas": minutes_to_hhmm(worked),
+                    "Minutos": int(worked),
+                    "Esperado_min": int(expected),
+                    "Esperado": minutes_to_hhmm(expected),
+                    "Saldo_min": int(saldo),
+                    "Saldo": delta_short(saldo),
+                    "Cumple": cumple,
+                    "Marcaciones": int(marc),
+                    "Pares_estimados": int(pairs),
+                    "Cortes": "SI" if cortes else "",
+                    "Incompleto": "SI" if incompleto else "",
+                }
+            )
+
+    d = pd.DataFrame(rows)
+    if d.empty:
+        return d
+    return d.sort_values(["Tipo", "Empleado", "DNI", "Fecha"]).reset_index(drop=True)
+
+
+def calc_daily(raw: pd.DataFrame, expected_nodoc: int, holidays: set, driver_mode: bool) -> pd.DataFrame:
+    if driver_mode:
+        return calc_daily_drivers(raw, expected_nodoc, holidays)
+    return calc_daily_standard(raw, expected_nodoc, holidays)
+
+
+# =========================
+# CORRECCIÓN AUTOMÁTICA NO DOCENTE
+# =========================
 def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
     if raw_emp.empty:
         return raw_emp, 0
@@ -575,7 +783,11 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
             fx_rows.append(row)
 
         add = pd.DataFrame(fx_rows)
-        corrected = pd.concat([corrected, add], ignore_index=True).sort_values("FechaHora").reset_index(drop=True)
+        corrected = (
+            pd.concat([corrected, add], ignore_index=True)
+            .sort_values("FechaHora")
+            .reset_index(drop=True)
+        )
 
     corrected["Fecha"] = corrected["FechaHora"].dt.date
     return corrected, nfix
@@ -604,6 +816,9 @@ def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple
     return out, total_fixes
 
 
+# =========================
+# RESÚMENES
+# =========================
 def summarize(daily: pd.DataFrame) -> pd.DataFrame:
     if daily.empty:
         return pd.DataFrame()
@@ -697,12 +912,9 @@ def pretty_summary(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def pretty_profiles(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    out["DNI"] = out["DNI"].apply(display_dni)
-    return out
-
-
+# =========================
+# EXPORT EXCEL
+# =========================
 def _safe_table_name(name: str) -> str:
     base = re.sub(r"[^A-Za-z0-9_]", "_", name)
     if not base:
@@ -750,6 +962,8 @@ def _apply_excel_style(ws, table_name: str) -> None:
 
 def export_general_excel(
     reduced: bool,
+    driver_mode: bool,
+    holidays_text: str,
     expected: int,
     kpis_general: dict,
     summary_all: pd.DataFrame,
@@ -779,8 +993,9 @@ def export_general_excel(
 
     df_kpis = pd.DataFrame([{
         "Horario_reducido": "SI" if reduced else "NO",
-        "Esperado_NO_Docente_LV": minutes_to_hhmm(expected),
-        "Regla_fin_de_semana": "Todo lo trabajado sábado y domingo cuenta como extra",
+        "Control_choferes": "SI" if driver_mode else "NO",
+        "Esperado_NO_Docente": minutes_to_hhmm(expected),
+        "Feriados_cargados": holidays_text.strip(),
         **kpis_general
     }])
     add_df("KPIs_General", df_kpis)
@@ -819,6 +1034,9 @@ def export_general_excel(
     return out.getvalue()
 
 
+# =========================
+# ESTADÍSTICAS
+# =========================
 def safe_pct(a: int, b: int) -> str:
     if b <= 0:
         return "0%"
@@ -829,7 +1047,7 @@ def histogram_hours(series_minutes: pd.Series, bin_hours: list[tuple[float, floa
     hours = series_minutes.fillna(0).astype(int) / 60.0
     rows = []
     for lo, hi in bin_hours:
-        label = f"{lo:.0f}-{hi:.0f}h" if hi < 999 else f"{lo:.0f}h+"
+        label = f"{lo:.0f}-{hi:.0f}H" if hi < 999 else f"{lo:.0f}H+"
         if hi >= 999:
             cnt = int((hours >= lo).sum())
         else:
@@ -838,28 +1056,43 @@ def histogram_hours(series_minutes: pd.Series, bin_hours: list[tuple[float, floa
     return pd.DataFrame(rows)
 
 
+# =========================
+# APP
+# =========================
 def main() -> None:
-    st.set_page_config(page_title="NEXO · Asistencia RRHH", page_icon="🫧", layout="wide")
+    st.set_page_config(page_title="CONTROL DE ASISTENCIA APP", page_icon="🫧", layout="wide")
     inject_css()
     hero_header()
 
-    a, b, c = st.columns([1.35, 0.90, 1.25])
-    with a:
-        st.markdown(
-            """<div class="pill">Procesa aunque falte DNI o nombre · Identificación flexible</div>""",
-            unsafe_allow_html=True,
+    with st.container():
+        st.markdown('<div class="toolbar-wrap">', unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            reduced = st.toggle("HORARIO REDUCIDO", value=False)
+        with col2:
+            driver_mode = st.toggle("CONTROL DE CHOFERES", value=False)
+        with col3:
+            st.markdown(
+                f"""<div class="pill">JORNADA {"06:00" if reduced else "07:00"}</div>""",
+                unsafe_allow_html=True,
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with st.expander("FERIADOS", expanded=False):
+        holidays_text = st.text_area(
+            "CARGAR FERIADOS (UNO POR LÍNEA O SEPARADOS POR COMA · FORMATO DD/MM/AAAA O AAAA-MM-DD)",
+            value=st.session_state.get("holidays_text", ""),
+            height=110,
         )
-    with b:
-        reduced = st.toggle("Horario reducido", value=False)
-    with c:
+        st.session_state["holidays_text"] = holidays_text
+        holidays = parse_holidays(holidays_text)
         st.markdown(
-            f"""<div class="pill">NO Docente L-V esperado: {"06:00" if reduced else "07:00"} · Sáb/Dom = todo extra</div>""",
+            f"""<div class="pill">FERIADOS CARGADOS: {len(holidays)}</div>""",
             unsafe_allow_html=True,
         )
 
     file = st.file_uploader("", type=["xlsx", "xlsm", "xls"], label_visibility="collapsed")
     if not file:
-        st.info("Subí un Excel del reloj para empezar.")
         return
 
     df0 = read_excel_auto(file)
@@ -868,37 +1101,37 @@ def main() -> None:
     _ = init_profiles(raw0)
 
     expected = 360 if reduced else 420
-    tabs = st.tabs(["General", "Empleado", "Perfiles"])
+    tabs = st.tabs(["GENERAL", "EMPLEADO", "PERFILES"])
 
+    # =======================
+    # GENERAL
+    # =======================
     with tabs[0]:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         raw = apply_profiles(raw0, st.session_state["profiles"])
 
-        left, right = st.columns([1.10, 1.0])
-        with left:
-            fix_all = st.button("Corregir faltas de marcación (TODOS)", use_container_width=True)
-        with right:
-            st.markdown("""<div class="pill">Aplica SOLO a NO Docentes con 1 sola marcación en el día</div>""", unsafe_allow_html=True)
-
         fixes_total = 0
-        if fix_all:
-            raw, fixes_total = correct_missing_punches_all(raw, expected)
-            st.markdown(f"""<div class="pill">Correcciones aplicadas: {fixes_total}</div>""", unsafe_allow_html=True)
+        if not driver_mode:
+            left, right = st.columns([1.05, 1])
+            with left:
+                fix_all = st.button("CORREGIR FALTAS DE MARCACIÓN (TODOS)", use_container_width=True)
+            with right:
+                st.markdown("""<div class="pill">SOLO NO DOCENTES CON 1 MARCACIÓN</div>""", unsafe_allow_html=True)
 
-        daily = calc_daily(raw, expected)
+            if fix_all:
+                raw, fixes_total = correct_missing_punches_all(raw, expected)
+                st.markdown(f"""<div class="pill">CORRECCIONES APLICADAS: {fixes_total}</div>""", unsafe_allow_html=True)
+
+        daily = calc_daily(raw, expected, holidays, driver_mode)
         summary = summarize(daily)
 
         total_min = int(daily["Minutos"].sum()) if not daily.empty else 0
         empleados = int(summary.shape[0]) if not summary.empty else 0
         dias = int(daily["Fecha"].nunique()) if not daily.empty else 0
         prom_dia = int(round(daily["Minutos"].mean())) if not daily.empty else 0
-        mediana_dia = int(round(daily["Minutos"].median())) if not daily.empty else 0
-        p90_dia = int(round(daily["Minutos"].quantile(0.90))) if not daily.empty else 0
 
         total_marc = int(daily["Marcaciones"].sum()) if not daily.empty else 0
-        prom_marc_dia = (total_marc / max(int(daily.shape[0]), 1)) if not daily.empty else 0
-
         incompletos = int((daily["Incompleto"] == "SI").sum()) if not daily.empty else 0
         cortes = int((daily["Cortes"] == "SI").sum()) if not daily.empty else 0
         total_registros_dia = int(daily.shape[0]) if not daily.empty else 0
@@ -910,33 +1143,29 @@ def main() -> None:
 
         nod_extras = int(nod.loc[nod["Saldo_min"] > 0, "Saldo_min"].sum()) if not nod.empty else 0
         nod_faltas = int((-nod.loc[nod["Saldo_min"] < 0, "Saldo_min"].sum())) if not nod.empty else 0
-        nod_saldo = int(nod["Saldo_min"].sum()) if not nod.empty else 0
 
         doc = daily[daily["Tipo"] == "Docente"].copy()
         doc_sum = int(doc["Minutos"].sum()) if not doc.empty else 0
 
         r1 = st.columns(4)
-        with r1[0]: kpi_card("Empleados", f"{empleados}", f"Días: {dias}")
-        with r1[1]: kpi_card("Total", minutes_to_hhmm(total_min), f"Prom/día: {minutes_to_hhmm(prom_dia)}")
-        with r1[2]: kpi_card("Mediana / P90", f"{minutes_to_hhmm(mediana_dia)}", f"P90: {minutes_to_hhmm(p90_dia)}")
-        with r1[3]: kpi_card("Marcaciones", f"{total_marc}", f"Prom por día: {prom_marc_dia:.2f}")
+        with r1[0]:
+            kpi_card("EMPLEADOS", f"{empleados}", f"DÍAS: {dias}")
+        with r1[1]:
+            kpi_card("TOTAL", minutes_to_hhmm(total_min), f"PROM/DÍA: {minutes_to_hhmm(prom_dia)}")
+        with r1[2]:
+            kpi_card("MARCACIONES", f"{total_marc}", f"INCOMPLETOS: {incompletos}")
+        with r1[3]:
+            kpi_card("CORTES", f"{cortes}", safe_pct(cortes, total_registros_dia))
 
         r2 = st.columns(4)
-        with r2[0]: kpi_card("Incompletos", f"{incompletos}", f"{safe_pct(incompletos, total_registros_dia)} de los días")
-        with r2[1]: kpi_card("Cortes", f"{cortes}", f"{safe_pct(cortes, total_registros_dia)} de los días")
-        with r2[2]: kpi_card("NO Docente", minutes_to_hhmm(nod_sum), f"Cumplimiento L-V: {nod_pct}")
-        with r2[3]: kpi_card("Docente", minutes_to_hhmm(doc_sum), "Tramos estimados por tiempo")
-
-        r3 = st.columns(4)
-        with r3[0]: kpi_card("Extras NO Docente", minutes_to_hhmm(nod_extras), "Incluye sábados y domingos completos")
-        with r3[1]: kpi_card("Faltas NO Docente", minutes_to_hhmm(nod_faltas), "Solo sobre días hábiles")
-        with r3[2]: kpi_card("Saldo neto NO Docente", delta_short(nod_saldo), "Informativo")
-        with r3[3]:
-            ok = int((nod["Cumple"] == "OK").sum()) if not nod.empty else 0
-            fa = int((nod["Cumple"] == "FALTA").sum()) if not nod.empty else 0
-            ic = int((nod["Cumple"] == "INCOMPLETO").sum()) if not nod.empty else 0
-            ex = int((nod["Cumple"] == "EXTRA").sum()) if not nod.empty else 0
-            kpi_card("NO Docente días", f"{ok}/{fa}/{ic}/{ex}", "OK / FALTA / INCOMP / EXTRA")
+        with r2[0]:
+            kpi_card("NO DOCENTE", minutes_to_hhmm(nod_sum), f"CUMPLIMIENTO: {nod_pct}")
+        with r2[1]:
+            kpi_card("EXTRAS NO DOCENTE", minutes_to_hhmm(nod_extras), "INCLUYE FERIADOS Y FIN DE SEMANA")
+        with r2[2]:
+            kpi_card("FALTAS NO DOCENTE", minutes_to_hhmm(nod_faltas), "SOLO DÍAS HÁBILES")
+        with r2[3]:
+            kpi_card("DOCENTE", minutes_to_hhmm(doc_sum), "POR TRAMOS")
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -952,8 +1181,7 @@ def main() -> None:
         else:
             extras_only = pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"])
 
-        st.markdown("### Solo extras (NO Docente)")
-        copy_table_button(extras_only, "Copiar SOLO EXTRAS (pegar en Excel)", key="copy_extras")
+        copy_table_button(extras_only, "COPIAR SOLO EXTRAS", key="copy_extras")
         st.table(extras_only)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
@@ -966,7 +1194,7 @@ def main() -> None:
             "Incompletos": incompletos,
             "Cortes": cortes,
             "NO_Docente_Total_HHMM": minutes_to_hhmm(nod_sum),
-            "NO_Docente_Cumplimiento_LV": nod_pct,
+            "NO_Docente_Cumplimiento": nod_pct,
             "NO_Docente_Extras_HHMM": minutes_to_hhmm(nod_extras),
             "NO_Docente_Faltas_HHMM": minutes_to_hhmm(nod_faltas),
             "Correcciones_masivas": fixes_total,
@@ -974,6 +1202,8 @@ def main() -> None:
 
         general_xlsx = export_general_excel(
             reduced=reduced,
+            driver_mode=driver_mode,
+            holidays_text=holidays_text,
             expected=expected,
             kpis_general=kpis_general,
             summary_all=summary.copy(),
@@ -983,7 +1213,7 @@ def main() -> None:
         )
 
         st.download_button(
-            "Exportar Resumen General (Excel)",
+            "EXPORTAR RESUMEN GENERAL (EXCEL)",
             data=general_xlsx,
             file_name="resumen_general_asistencia.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -996,58 +1226,37 @@ def main() -> None:
             by_day = daily.groupby("Fecha", as_index=False).agg(Minutos=("Minutos", "sum"))
             by_day["Horas"] = by_day["Minutos"] / 60.0
             by_day = by_day.sort_values("Fecha")
+            st.line_chart(by_day.set_index("Fecha")[["Horas"]], height=230)
 
-            st.markdown("### Horas totales por día")
-            st.line_chart(by_day.set_index("Fecha")[["Horas"]], height=240)
-
-            by_day_tipo = daily.groupby(["Fecha", "Tipo"], as_index=False).agg(Minutos=("Minutos", "sum"))
-            pivot = by_day_tipo.pivot(index="Fecha", columns="Tipo", values="Minutos").fillna(0) / 60.0
-            st.markdown("### Horas por día (NO Docente vs Docente)")
-            st.area_chart(pivot, height=240)
-
-            st.markdown("### Distribución (horas por día)")
-            bins = [(0, 2), (2, 4), (4, 6), (6, 8), (8, 10), (10, 999)]
-            hist = histogram_hours(daily["Minutos"], bins).set_index("Rango")
-            st.bar_chart(hist[["Días"]], height=240)
-
-            st.markdown("### Top 15 empleados por horas")
-            top_hours = (
-                daily.groupby(["Empleado", "DNI", "Tipo"], as_index=False)
-                .agg(Total_min=("Minutos", "sum"))
-                .sort_values("Total_min", ascending=False)
-                .head(15)
-            )
-            top_hours["Empleado"] = top_hours["Empleado"].astype(str)
-            top_hours["Total_horas"] = top_hours["Total_min"] / 60.0
-            st.bar_chart(top_hours.set_index("Empleado")[["Total_horas"]], height=270)
-
-            st.markdown("### Incompletos por día")
-            inc_day = (
-                daily.assign(Incomp=(daily["Incompleto"] == "SI").astype(int))
-                .groupby("Fecha", as_index=False)
-                .agg(Incompletos=("Incomp", "sum"))
-                .set_index("Fecha")
-            )
-            st.bar_chart(inc_day[["Incompletos"]], height=240)
+            hist = histogram_hours(daily["Minutos"], [(0, 2), (2, 4), (4, 6), (6, 8), (8, 10), (10, 999)]).set_index("Rango")
+            st.bar_chart(hist[["Días"]], height=230)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        st.markdown("### Resumen completo (incluye Extras)")
         summary_show = pretty_summary(summary)
-        copy_table_button(summary_show, "Copiar RESUMEN COMPLETO (pegar en Excel)", key="copy_summary")
+        copy_table_button(summary_show, "COPIAR RESUMEN COMPLETO", key="copy_summary")
         st.dataframe(summary_show, use_container_width=True, height=560, hide_index=True)
 
         st.session_state["__raw__"] = raw
         st.session_state["__daily__"] = daily
         st.session_state["__summary__"] = summary
+        st.session_state["__expected__"] = expected
+        st.session_state["__driver_mode__"] = driver_mode
+        st.session_state["__holidays__"] = holidays
 
+    # =======================
+    # EMPLEADO
+    # =======================
     with tabs[1]:
         raw = st.session_state.get("__raw__", None)
         daily = st.session_state.get("__daily__", None)
         summary = st.session_state.get("__summary__", None)
+        expected = st.session_state.get("__expected__", expected)
+        driver_mode = st.session_state.get("__driver_mode__", driver_mode)
+        holidays = st.session_state.get("__holidays__", holidays)
 
         if raw is None or daily is None or summary is None or summary.empty:
-            st.info("Cargá un Excel para ver esta sección.")
+            st.info("CARGÁ UN EXCEL PARA VER ESTA SECCIÓN.")
             return
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
@@ -1070,28 +1279,36 @@ def main() -> None:
 
         raw_emp = raw[(raw["EmployeeKey"] == ekey) & (raw["Tipo"] == tipo)].copy().sort_values("FechaHora")
 
-        fix = False
         fixes_applied = 0
-        if tipo == "NO Docente":
-            fix = st.button("Corregir falta de marcación", use_container_width=True)
+        if tipo == "NO Docente" and not driver_mode:
+            fix = st.button("CORREGIR FALTA DE MARCACIÓN", use_container_width=True)
+            if fix:
+                corrected_raw_emp, fixes_applied = correct_missing_punches_for_employee(raw_emp, expected)
 
-        if tipo == "NO Docente" and fix:
-            corrected_raw_emp, fixes_applied = correct_missing_punches_for_employee(raw_emp, expected)
+                raw_corrected = raw.copy()
+                mask = (raw_corrected["EmployeeKey"] == ekey) & (raw_corrected["Tipo"] == tipo)
+                raw_corrected = raw_corrected[~mask]
+                raw_corrected = pd.concat([raw_corrected, corrected_raw_emp], ignore_index=True)
+                raw_corrected = raw_corrected.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
 
-            raw_corrected = raw.copy()
-            mask = (raw_corrected["EmployeeKey"] == ekey) & (raw_corrected["Tipo"] == tipo)
-            raw_corrected = raw_corrected[~mask]
-            raw_corrected = pd.concat([raw_corrected, corrected_raw_emp], ignore_index=True)
-            raw_corrected = raw_corrected.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
-
-            daily_corrected = calc_daily(raw_corrected, expected)
-            daily_emp = daily_corrected[(daily_corrected["EmployeeKey"] == ekey) & (daily_corrected["Tipo"] == tipo)].copy()
-            raw_emp = corrected_raw_emp
+                daily_corrected = calc_daily(raw_corrected, expected, holidays, driver_mode)
+                daily_emp = daily_corrected[
+                    (daily_corrected["EmployeeKey"] == ekey) &
+                    (daily_corrected["Tipo"] == tipo)
+                ].copy()
+            else:
+                daily_emp = daily[
+                    (daily["EmployeeKey"] == ekey) &
+                    (daily["Tipo"] == tipo)
+                ].copy()
         else:
-            daily_emp = daily[(daily["EmployeeKey"] == ekey) & (daily["Tipo"] == tipo)].copy()
+            daily_emp = daily[
+                (daily["EmployeeKey"] == ekey) &
+                (daily["Tipo"] == tipo)
+            ].copy()
 
         if daily_emp.empty:
-            st.warning("Sin datos para este empleado.")
+            st.warning("SIN DATOS PARA ESTE EMPLEADO.")
             return
 
         total_min = int(daily_emp["Minutos"].sum())
@@ -1103,17 +1320,8 @@ def main() -> None:
         marc_total = int(daily_emp["Marcaciones"].sum())
         marc_prom = marc_total / max(int(daily_emp.shape[0]), 1)
 
-        pares_0 = int((daily_emp["Pares_estimados"] == 0).sum())
-        max_day = int(daily_emp["Minutos"].max())
-        min_day = int(daily_emp["Minutos"].min())
-
         exp_sum = int(daily_emp["Esperado_min"].sum())
         saldo_sum = int(daily_emp["Saldo_min"].sum())
-
-        ok_days = int((daily_emp["Cumple"] == "OK").sum())
-        falta_days = int((daily_emp["Cumple"] == "FALTA").sum())
-        incom_days = int((daily_emp["Cumple"] == "INCOMPLETO").sum())
-        extra_days = int((daily_emp["Cumple"] == "EXTRA").sum())
 
         extras_min = 0
         faltas_min = 0
@@ -1124,57 +1332,47 @@ def main() -> None:
             pct = f"{(total_min / exp_sum * 100):.0f}%" if exp_sum > 0 else ""
 
         r1 = st.columns(4)
-        with r1[0]: kpi_card(emp, minutes_to_hhmm(total_min), f"{tipo} · {display_dni(dni)}")
-        with r1[1]: kpi_card("Días", f"{dias}", f"Prom/día: {minutes_to_hhmm(prom)}")
-        with r1[2]: kpi_card("Marcaciones", f"{marc_total}", f"Prom/día: {marc_prom:.2f} · Pares=0: {pares_0}")
+        with r1[0]:
+            kpi_card(emp, minutes_to_hhmm(total_min), f"{tipo} · {display_dni(dni)}")
+        with r1[1]:
+            kpi_card("DÍAS", f"{dias}", f"PROM/DÍA: {minutes_to_hhmm(prom)}")
+        with r1[2]:
+            kpi_card("MARCACIONES", f"{marc_total}", f"PROM/DÍA: {marc_prom:.2f}")
         with r1[3]:
             if tipo == "NO Docente":
-                kpi_card("Extras del mes", minutes_to_hhmm(extras_min), f"Faltas: {minutes_to_hhmm(faltas_min)} · Cumpl. L-V: {pct}")
+                kpi_card("EXTRAS", minutes_to_hhmm(extras_min), f"FALTAS: {minutes_to_hhmm(faltas_min)} · {pct}")
             else:
-                kpi_card("Total (Docente)", minutes_to_hhmm(total_min), "Por tramos estimados")
+                kpi_card("TOTAL", minutes_to_hhmm(total_min), "DOCENTE")
 
-        r2 = st.columns(4)
-        with r2[0]: kpi_card("Incompletos", f"{inc}", f"Cortes: {cuts}")
-        with r2[1]: kpi_card("Máx / Mín día", minutes_to_hhmm(max_day), f"Mín: {minutes_to_hhmm(min_day)}")
+        r2 = st.columns(3)
+        with r2[0]:
+            kpi_card("INCOMPLETOS", f"{inc}", "")
+        with r2[1]:
+            kpi_card("CORTES", f"{cuts}", "")
         with r2[2]:
             if tipo == "NO Docente":
-                kpi_card("Saldo neto", delta_short(saldo_sum), "Acumulado del período")
+                kpi_card("SALDO", delta_short(saldo_sum), "ACUMULADO")
             else:
-                kpi_card("Cortes", f"{cuts}", "Días con varios tramos")
-        with r2[3]:
-            if tipo == "NO Docente":
-                kpi_card("Días OK/FALTA/INC/EXTRA", f"{ok_days}/{falta_days}/{incom_days}/{extra_days}", "L-V / L-V / cualquier / sáb-dom")
-            else:
-                kpi_card("Alertas", f"{inc}", "Días sin pares estimados")
+                kpi_card("SALDO", "—", "")
 
         if fixes_applied:
-            st.markdown(f"""<div class="pill">Correcciones aplicadas: {fixes_applied}</div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="pill">CORRECCIONES APLICADAS: {fixes_applied}</div>""", unsafe_allow_html=True)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         ch = daily_emp.sort_values("Fecha").copy()
         ch["Horas_float"] = ch["Minutos"] / 60.0
-
-        st.markdown("### Horas por día (empleado)")
-        st.bar_chart(ch.set_index("Fecha")[["Horas_float"]], height=250)
-
-        if tipo == "NO Docente":
-            st.markdown("### Saldo por día (NO Docente)")
-            saldo_df = ch[["Fecha", "Saldo_min"]].copy()
-            saldo_df["Saldo_horas"] = saldo_df["Saldo_min"] / 60.0
-            st.bar_chart(saldo_df.set_index("Fecha")[["Saldo_horas"]], height=230)
-
-        st.markdown("### Marcaciones por día")
-        marc_df = ch[["Fecha", "Marcaciones"]].set_index("Fecha")
-        st.bar_chart(marc_df[["Marcaciones"]], height=230)
+        st.bar_chart(ch.set_index("Fecha")[["Horas_float"]], height=240)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         det = employee_detail_table(daily_emp)
-        st.markdown("### Detalle día a día (empleado)")
-        copy_table_button(det, "Copiar DETALLE DÍA A DÍA (pegar en Excel)", key="copy_emp_detail")
+        copy_table_button(det, "COPIAR DETALLE DÍA A DÍA", key="copy_emp_detail")
         st.dataframe(det, use_container_width=True, height=560, hide_index=True)
 
+    # =======================
+    # PERFILES
+    # =======================
     with tabs[2]:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1188,10 +1386,10 @@ def main() -> None:
             hide_index=True,
             disabled=["EmployeeKey", "DNI", "Empleado"],
             column_config={
-                "EmployeeKey": st.column_config.TextColumn("ID interno", help="Clave interna de identificación", width="medium"),
+                "EmployeeKey": st.column_config.TextColumn("ID INTERNO", width="medium"),
                 "DNI": st.column_config.TextColumn("DNI", width="small"),
-                "Empleado": st.column_config.TextColumn("Empleado", width="large"),
-                "Tipo": st.column_config.SelectboxColumn("Tipo", options=["NO Docente", "Docente"], required=True),
+                "Empleado": st.column_config.TextColumn("EMPLEADO", width="large"),
+                "Tipo": st.column_config.SelectboxColumn("TIPO", options=["NO Docente", "Docente"], required=True),
             },
         )
 
