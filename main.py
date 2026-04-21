@@ -550,8 +550,8 @@ def holidays_to_text(holidays: set[date]) -> str:
 def init_holidays_state() -> None:
     if "holidays_set" not in st.session_state:
         st.session_state["holidays_set"] = set()
-    if "holidays_text" not in st.session_state:
-        st.session_state["holidays_text"] = ""
+    if "holidays_text_input" not in st.session_state:
+        st.session_state["holidays_text_input"] = ""
     if "holiday_calendar_month" not in st.session_state:
         today = date.today()
         st.session_state["holiday_calendar_month"] = today.month
@@ -559,18 +559,18 @@ def init_holidays_state() -> None:
         st.session_state["holiday_calendar_year"] = date.today().year
 
 
-def sync_holidays_text_from_set() -> None:
-    st.session_state["holidays_text"] = holidays_to_text(st.session_state["holidays_set"])
+def sync_holidays_text_input_from_set() -> None:
+    st.session_state["holidays_text_input"] = holidays_to_text(st.session_state["holidays_set"])
 
 
-def apply_text_holidays() -> None:
-    st.session_state["holidays_set"] = parse_holidays(st.session_state.get("holidays_text", ""))
-    sync_holidays_text_from_set()
+def apply_text_holidays_from_value(text_value: str) -> None:
+    st.session_state["holidays_set"] = parse_holidays(text_value or "")
+    sync_holidays_text_input_from_set()
 
 
 def clear_all_holidays() -> None:
     st.session_state["holidays_set"] = set()
-    sync_holidays_text_from_set()
+    st.session_state["holidays_text_input"] = ""
 
 
 def toggle_holiday(day_value: date) -> None:
@@ -580,7 +580,7 @@ def toggle_holiday(day_value: date) -> None:
     else:
         holidays.add(day_value)
     st.session_state["holidays_set"] = holidays
-    sync_holidays_text_from_set()
+    sync_holidays_text_input_from_set()
 
 
 def render_holiday_calendar() -> None:
@@ -647,7 +647,6 @@ def render_holiday_calendar() -> None:
 
                 current_date = date(year, month, day_num)
                 is_holiday = current_date in holidays
-
                 label = f"🟦 {day_num}" if is_holiday else f"{day_num}"
                 key = f"holiday_btn_{year}_{month}_{day_num}_{week_idx}_{day_idx}"
 
@@ -1237,21 +1236,23 @@ def main() -> None:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with st.expander("FERIADOS", expanded=False):
-        st.text_area(
+        holidays_text_value = st.text_area(
             "CARGAR FERIADOS (UNO POR LÍNEA O SEPARADOS POR COMA · FORMATO DD/MM/AAAA O AAAA-MM-DD)",
-            key="holidays_text",
+            value=st.session_state.get("holidays_text_input", ""),
             height=110,
         )
 
         a1, a2, a3 = st.columns(3)
         with a1:
             if st.button("APLICAR FERIADOS ESCRITOS", use_container_width=True):
-                apply_text_holidays()
+                apply_text_holidays_from_value(holidays_text_value)
                 st.rerun()
+
         with a2:
             if st.button("LIMPIAR TODOS LOS FERIADOS", use_container_width=True):
                 clear_all_holidays()
                 st.rerun()
+
         with a3:
             st.markdown(
                 f"""<div class="pill">FERIADOS CARGADOS: {len(st.session_state["holidays_set"])}</div>""",
@@ -1267,7 +1268,7 @@ def main() -> None:
             st.dataframe(holidays_df, use_container_width=True, height=180, hide_index=True)
 
     holidays = set(st.session_state["holidays_set"])
-    holidays_text = st.session_state["holidays_text"]
+    holidays_text = st.session_state["holidays_text_input"]
 
     file = st.file_uploader("", type=["xlsx", "xlsm", "xls"], label_visibility="collapsed")
     if not file:
@@ -1578,4 +1579,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
