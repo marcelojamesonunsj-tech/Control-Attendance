@@ -5,7 +5,9 @@ import re
 import json
 import html
 import unicodedata
+import calendar
 from collections import defaultdict
+from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -18,6 +20,21 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 REQUIRED_COLS = ["Estado"]
 OPTIONAL_COLS = ["Nombre", "Marc.", "NvoEstado"]
+
+MONTH_NAMES = {
+    1: "ENERO",
+    2: "FEBRERO",
+    3: "MARZO",
+    4: "ABRIL",
+    5: "MAYO",
+    6: "JUNIO",
+    7: "JULIO",
+    8: "AGOSTO",
+    9: "SEPTIEMBRE",
+    10: "OCTUBRE",
+    11: "NOVIEMBRE",
+    12: "DICIEMBRE",
+}
 
 
 # =========================
@@ -159,6 +176,30 @@ def inject_css() -> None:
             margin: 1rem 0 1rem 0;
         }
 
+        .calendar-wrap{
+            background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.04));
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 20px;
+            padding: 14px;
+            margin-top: 12px;
+        }
+
+        .calendar-weekday{
+            text-align:center;
+            font-size:.78rem;
+            font-weight:800;
+            color: rgba(255,255,255,.78);
+            letter-spacing:.45px;
+            margin-bottom:6px;
+        }
+
+        .calendar-note{
+            font-size:.80rem;
+            opacity:.82;
+            letter-spacing:.25px;
+            text-transform:uppercase;
+        }
+
         div[data-testid="stFileUploader"] > section,
         div[data-testid="stDataFrame"],
         div[data-testid="stTable"],
@@ -203,7 +244,8 @@ def inject_css() -> None:
 
         div[data-baseweb="select"] > div,
         .stTextInput > div > div > input,
-        .stTextArea textarea {
+        .stTextArea textarea,
+        input[type="number"] {
             background: rgba(255,255,255,.08) !important;
             border: 1px solid rgba(255,255,255,.15) !important;
             border-radius: 14px !important;
@@ -483,8 +525,8 @@ def apply_profiles(raw: pd.DataFrame, profiles: pd.DataFrame) -> pd.DataFrame:
     return m
 
 
-def parse_holidays(text: str) -> set:
-    holidays = set()
+def parse_holidays(text: str) -> set[date]:
+    holidays: set[date] = set()
     if not text:
         return holidays
 
@@ -499,8 +541,129 @@ def parse_holidays(text: str) -> set:
     return holidays
 
 
-def is_special_day(day, holidays: set) -> bool:
-    ts = pd.to_datetime(day)
+def holidays_to_text(holidays: set[date]) -> str:
+    if not holidays:
+        return ""
+    return "\n".join(sorted([d.strftime("%d/%m/%Y") for d in holidays]))
+
+
+def init_holidays_state() -> None:
+    if "holidays_set" not in st.session_state:
+        st.session_state["holidays_set"] = set()
+    if "holidays_text" not in st.session_state:
+        st.session_state["holidays_text"] = ""
+    if "holiday_calendar_month" not in st.session_state:
+        today = date.today()
+        st.session_state["holiday_calendar_month"] = today.month
+    if "holiday_calendar_year" not in st.session_state:
+        st.session_state["holiday_calendar_year"] = date.today().year
+
+
+def sync_holidays_text_from_set() -> None:
+    st.session_state["holidays_text"] = holidays_to_text(st.session_state["holidays_set"])
+
+
+def apply_text_holidays() -> None:
+    st.session_state["holidays_set"] = parse_holidays(st.session_state.get("holidays_text", ""))
+    sync_holidays_text_from_set()
+
+
+def clear_all_holidays() -> None:
+    st.session_state["holidays_set"] = set()
+    sync_holidays_text_from_set()
+
+
+def toggle_holiday(day_value: date) -> None:
+    holidays = set(st.session_state["holidays_set"])
+    if day_value in holidays:
+        holidays.remove(day_value)
+    else:
+        holidays.add(day_value)
+    st.session_state["holidays_set"] = holidays
+    sync_holidays_text_from_set()
+
+
+def render_holiday_calendar() -> None:
+    month = int(st.session_state["holiday_calendar_month"])
+    year = int(st.session_state["holiday_calendar_year"])
+    holidays = st.session_state["holidays_set"]
+
+    st.markdown('<div class="calendar-wrap">', unsafe_allow_html=True)
+
+    nav1, nav2, nav3, nav4 = st.columns([1.2, 1, 1, 1.4])
+    with nav1:
+        selected_month_name = st.selectbox(
+            "MES",
+            options=list(MONTH_NAMES.values()),
+            index=month - 1,
+            key="holiday_month_name_selector",
+            label_visibility="collapsed",
+        )
+        month = {v: k for k, v in MONTH_NAMES.items()}[selected_month_name]
+        st.session_state["holiday_calendar_month"] = month
+
+    with nav2:
+        selected_year = st.number_input(
+            "AÑO",
+            min_value=2000,
+            max_value=2100,
+            value=year,
+            step=1,
+            key="holiday_year_number",
+            label_visibility="collapsed",
+        )
+        year = int(selected_year)
+        st.session_state["holiday_calendar_year"] = year
+
+    with nav3:
+        if st.button("HOY", key="holiday_go_today"):
+            today = date.today()
+            st.session_state["holiday_calendar_month"] = today.month
+            st.session_state["holiday_calendar_year"] = today.year
+            st.rerun()
+
+    with nav4:
+        st.markdown(
+            f"""<div class="pill">{MONTH_NAMES[month]} {year}</div>""",
+            unsafe_allow_html=True,
+        )
+
+    week_cols = st.columns(7)
+    weekday_names = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"]
+    for col, wd in zip(week_cols, weekday_names):
+        with col:
+            st.markdown(f'<div class="calendar-weekday">{wd}</div>', unsafe_allow_html=True)
+
+    cal = calendar.Calendar(firstweekday=0)
+    weeks = cal.monthdayscalendar(year, month)
+
+    for week_idx, week in enumerate(weeks):
+        cols = st.columns(7)
+        for day_idx, day_num in enumerate(week):
+            with cols[day_idx]:
+                if day_num == 0:
+                    st.markdown("&nbsp;", unsafe_allow_html=True)
+                    continue
+
+                current_date = date(year, month, day_num)
+                is_holiday = current_date in holidays
+
+                label = f"🟦 {day_num}" if is_holiday else f"{day_num}"
+                key = f"holiday_btn_{year}_{month}_{day_num}_{week_idx}_{day_idx}"
+
+                if st.button(label, key=key, use_container_width=True):
+                    toggle_holiday(current_date)
+                    st.rerun()
+
+    st.markdown(
+        '<div class="calendar-note">TOCÁ UN DÍA PARA AGREGARLO O QUITARLO COMO FERIADO.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def is_special_day(day_value, holidays: set[date]) -> bool:
+    ts = pd.to_datetime(day_value)
     return ts.weekday() >= 5 or ts.date() in holidays
 
 
@@ -535,7 +698,7 @@ def split_interval_by_day(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[
 # =========================
 # CÁLCULO NORMAL
 # =========================
-def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set) -> pd.DataFrame:
+def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set[date]) -> pd.DataFrame:
     rows = []
 
     for (ekey, dni, emp, tipo, day), g in raw.groupby(
@@ -623,7 +786,7 @@ def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set) -
 # =========================
 # CÁLCULO CHOFERES
 # =========================
-def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set) -> pd.DataFrame:
+def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set[date]) -> pd.DataFrame:
     rows = []
 
     for (ekey, dni, emp, tipo), g_emp in raw.groupby(
@@ -631,7 +794,6 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set) ->
     ):
         g_emp = g_emp.sort_values("FechaHora").copy()
 
-        # Docentes: mantienen lógica normal diaria
         if tipo == "Docente":
             g_doc = calc_daily_standard(g_emp.copy(), expected_nodoc, holidays)
             if not g_doc.empty:
@@ -640,7 +802,6 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set) ->
 
         times = g_emp["FechaHora"].tolist()
 
-        # Estadísticas crudas por día
         raw_day_stats = {}
         for day, g_day in g_emp.groupby("Fecha"):
             g_day = g_day.sort_values("FechaHora")
@@ -654,7 +815,6 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set) ->
         day_expected = defaultdict(int)
         day_pairs = defaultdict(int)
 
-        # Armado por viajes continuos (pares globales, no por día)
         for i in range(0, len(times) - 1, 2):
             start = times[i]
             end = times[i + 1]
@@ -670,17 +830,14 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set) ->
 
                 if special:
                     normal_chunk = 0
-                    extra_chunk = minutes
                 else:
                     normal_chunk = min(minutes, remaining_normal)
-                    extra_chunk = minutes - normal_chunk
                     remaining_normal -= normal_chunk
 
                 day_worked[day_date] += minutes
                 day_expected[day_date] += normal_chunk
                 day_pairs[day_date] += 1
 
-        # Detectar marca global incompleta
         unmatched_day = None
         if len(times) % 2 != 0:
             unmatched_day = pd.to_datetime(times[-1]).date()
@@ -745,7 +902,7 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set) ->
     return d.sort_values(["Tipo", "Empleado", "DNI", "Fecha"]).reset_index(drop=True)
 
 
-def calc_daily(raw: pd.DataFrame, expected_nodoc: int, holidays: set, driver_mode: bool) -> pd.DataFrame:
+def calc_daily(raw: pd.DataFrame, expected_nodoc: int, holidays: set[date], driver_mode: bool) -> pd.DataFrame:
     if driver_mode:
         return calc_daily_drivers(raw, expected_nodoc, holidays)
     return calc_daily_standard(raw, expected_nodoc, holidays)
@@ -1063,6 +1220,7 @@ def main() -> None:
     st.set_page_config(page_title="CONTROL DE ASISTENCIA APP", page_icon="🫧", layout="wide")
     inject_css()
     hero_header()
+    init_holidays_state()
 
     with st.container():
         st.markdown('<div class="toolbar-wrap">', unsafe_allow_html=True)
@@ -1079,17 +1237,37 @@ def main() -> None:
         st.markdown('</div>', unsafe_allow_html=True)
 
     with st.expander("FERIADOS", expanded=False):
-        holidays_text = st.text_area(
+        st.text_area(
             "CARGAR FERIADOS (UNO POR LÍNEA O SEPARADOS POR COMA · FORMATO DD/MM/AAAA O AAAA-MM-DD)",
-            value=st.session_state.get("holidays_text", ""),
+            key="holidays_text",
             height=110,
         )
-        st.session_state["holidays_text"] = holidays_text
-        holidays = parse_holidays(holidays_text)
-        st.markdown(
-            f"""<div class="pill">FERIADOS CARGADOS: {len(holidays)}</div>""",
-            unsafe_allow_html=True,
-        )
+
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            if st.button("APLICAR FERIADOS ESCRITOS", use_container_width=True):
+                apply_text_holidays()
+                st.rerun()
+        with a2:
+            if st.button("LIMPIAR TODOS LOS FERIADOS", use_container_width=True):
+                clear_all_holidays()
+                st.rerun()
+        with a3:
+            st.markdown(
+                f"""<div class="pill">FERIADOS CARGADOS: {len(st.session_state["holidays_set"])}</div>""",
+                unsafe_allow_html=True,
+            )
+
+        render_holiday_calendar()
+
+        if st.session_state["holidays_set"]:
+            holidays_df = pd.DataFrame(
+                {"FERIADO": [d.strftime("%d/%m/%Y") for d in sorted(st.session_state["holidays_set"])]}
+            )
+            st.dataframe(holidays_df, use_container_width=True, height=180, hide_index=True)
+
+    holidays = set(st.session_state["holidays_set"])
+    holidays_text = st.session_state["holidays_text"]
 
     file = st.file_uploader("", type=["xlsx", "xlsm", "xls"], label_visibility="collapsed")
     if not file:
