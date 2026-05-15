@@ -18,8 +18,15 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 
+# ============================================================
+# CONFIGURACIÓN GENERAL
+# ============================================================
 REQUIRED_COLS = ["Estado"]
 OPTIONAL_COLS = ["Nombre", "Marc.", "NvoEstado"]
+
+# Toda marcación entre 00:00 y 03:59 se considera salida del día laboral anterior.
+# Esto evita que una salida a la 01:30 o 02:00 quede como un día nuevo.
+WORKDAY_CUTOFF_HOUR = 4
 
 MONTH_NAMES = {
     1: "ENERO",
@@ -37,9 +44,9 @@ MONTH_NAMES = {
 }
 
 
-# =========================
+# ============================================================
 # UI
-# =========================
+# ============================================================
 def inject_css() -> None:
     st.markdown(
         """
@@ -69,7 +76,7 @@ def inject_css() -> None:
         }
 
         .block-container {
-            max-width: 1180px;
+            max-width: 1220px;
             padding-top: 1rem;
             padding-bottom: 1.4rem;
         }
@@ -121,7 +128,7 @@ def inject_css() -> None:
             border: 1px solid rgba(255,255,255,0.14);
             border-radius: 22px;
             padding: 16px 16px;
-            min-height: 110px;
+            min-height: 112px;
             background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
             box-shadow: 0 10px 28px rgba(0,0,0,.16);
             backdrop-filter: blur(14px) saturate(155%);
@@ -168,6 +175,15 @@ def inject_css() -> None:
             -webkit-backdrop-filter: blur(14px);
             text-transform: uppercase;
             letter-spacing: .35px;
+        }
+
+        .section-title {
+            font-size: 1.08rem;
+            font-weight: 900;
+            letter-spacing: .55px;
+            text-transform: uppercase;
+            margin: .25rem 0 .55rem 0;
+            color: rgba(255,255,255,.95);
         }
 
         .hr {
@@ -308,8 +324,8 @@ def hero_header() -> None:
     st.markdown(
         """
         <div class="hero-wrap">
-            <div class="hero-title">CONTROL DE ASISTENCIA</div>
-            <div class="hero-sub">developed by Jameson BrickTech</div>
+            <div class="hero-title">CONTROL DE ASISTENCIA APP</div>
+            <div class="hero-sub">DESARROLLADA POR MARCELO JAMESON</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -329,9 +345,13 @@ def kpi_card(label: str, value: str, sub: str = "") -> None:
     )
 
 
-# =========================
+def section_title(title: str) -> None:
+    st.markdown(f'<div class="section-title">{html.escape(str(title))}</div>', unsafe_allow_html=True)
+
+
+# ============================================================
 # COPY
-# =========================
+# ============================================================
 def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
     if df is None:
         df = pd.DataFrame()
@@ -374,17 +394,17 @@ def copy_table_button(df: pd.DataFrame, label: str, key: str) -> None:
     )
 
 
-# =========================
+# ============================================================
 # HELPERS
-# =========================
-def minutes_to_hhmm(mins: int) -> str:
+# ============================================================
+def minutes_to_hhmm(mins: int | float | None) -> str:
     mins = int(round(mins)) if mins is not None else 0
     h = mins // 60
     m = mins % 60
     return f"{h:02d}:{m:02d}"
 
 
-def delta_short(mins: int) -> str:
+def delta_short(mins: int | float) -> str:
     mins = int(round(mins))
     sign = "+" if mins > 0 else "-" if mins < 0 else ""
     mins_abs = abs(mins)
@@ -405,6 +425,19 @@ def normalize_text_key(value: str) -> str:
 def display_dni(value: str) -> str:
     v = str(value or "").strip()
     return v if v else "SIN DNI"
+
+
+def get_work_date(dt: pd.Timestamp) -> date:
+    """
+    Fecha laboral:
+    - 00:00 a 03:59 se considera día anterior.
+    - desde 04:00 se considera el mismo día.
+    """
+    if pd.isna(dt):
+        return date.today()
+    if int(dt.hour) < WORKDAY_CUTOFF_HOUR:
+        return (dt - pd.Timedelta(days=1)).date()
+    return dt.date()
 
 
 def read_excel_auto(file) -> pd.DataFrame:
@@ -490,7 +523,14 @@ def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
         return f"REG::{rowid}"
 
     df["EmployeeKey"] = df.apply(resolve_employee_key, axis=1)
-    df["Fecha"] = df["FechaHora"].dt.date
+
+    # Fecha real calendario y fecha laboral corregida.
+    df["FechaReal"] = df["FechaHora"].dt.date
+    df["Fecha"] = df["FechaHora"].apply(get_work_date)
+    df["Ajuste_madrugada"] = df.apply(
+        lambda r: "SI" if r["Fecha"] != r["FechaReal"] else "",
+        axis=1,
+    )
 
     df = df.sort_values(["Empleado", "DNI", "FechaHora"]).reset_index(drop=True)
     df["DNI"] = df["DNI"].astype(str)
@@ -525,6 +565,9 @@ def apply_profiles(raw: pd.DataFrame, profiles: pd.DataFrame) -> pd.DataFrame:
     return m
 
 
+# ============================================================
+# FERIADOS
+# ============================================================
 def parse_holidays(text: str) -> set[date]:
     holidays: set[date] = set()
     if not text:
@@ -661,12 +704,40 @@ def render_holiday_calendar() -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def is_weekend(day_value) -> bool:
+    return pd.to_datetime(day_value).weekday() >= 5
+
+
+def is_holiday(day_value, holidays: set[date]) -> bool:
+    return pd.to_datetime(day_value).date() in holidays
+
+
 def is_special_day(day_value, holidays: set[date]) -> bool:
     ts = pd.to_datetime(day_value)
     return ts.weekday() >= 5 or ts.date() in holidays
 
 
+def day_type_label(day_value, holidays: set[date]) -> str:
+    weekend = is_weekend(day_value)
+    holiday = is_holiday(day_value, holidays)
+    if weekend and holiday:
+        return "FERIADO/FIN DE SEMANA"
+    if holiday:
+        return "FERIADO"
+    if weekend:
+        return "FIN DE SEMANA"
+    return "HÁBIL"
+
+
+# ============================================================
+# CÁLCULOS DE MARCACIONES
+# ============================================================
 def pair_alternating(times: list[pd.Timestamp]) -> tuple[int, int]:
+    """
+    Suma pares alternados entrada/salida:
+    07:00-14:00 + 17:00-21:00 = 11 horas.
+    No usa primera-última, porque eso contaría descansos como trabajados.
+    """
     times = [t for t in times if pd.notna(t)]
     times.sort()
     total = 0
@@ -694,9 +765,30 @@ def split_interval_by_day(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[
     return chunks
 
 
-# =========================
+def expected_and_saldo(worked: int, expected_nodoc: int, special: bool, has_mark: bool) -> tuple[int, int, str]:
+    if special:
+        expected = 0
+        saldo = worked
+        if worked > 0:
+            cumple = "EXTRA"
+        else:
+            cumple = ""
+        return expected, saldo, cumple
+
+    expected = expected_nodoc if has_mark else 0
+    saldo = worked - expected if expected else 0
+
+    if expected:
+        cumple = "OK" if saldo >= 0 else "FALTA"
+    else:
+        cumple = ""
+
+    return expected, saldo, cumple
+
+
+# ============================================================
 # CÁLCULO NORMAL
-# =========================
+# ============================================================
 def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set[date]) -> pd.DataFrame:
     rows = []
 
@@ -712,44 +804,30 @@ def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set[da
 
         worked_pairs, pairs = pair_alternating(times)
 
-        span = 0
-        if pd.notna(first) and pd.notna(last) and last >= first:
-            span = int((last - first).total_seconds() // 60)
-
         fecha_ts = pd.to_datetime(day)
-        day_is_special = is_special_day(fecha_ts.date(), holidays)
-        day_type = "FERIADO/FIN DE SEMANA" if day_is_special else "HÁBIL"
+        special = is_special_day(fecha_ts.date(), holidays)
+        tipo_dia = day_type_label(fecha_ts.date(), holidays)
 
-        incompleto = (marc < 2) if tipo == "NO Docente" else (pairs == 0)
-        cortes = (pairs >= 2)
+        incompleto = (marc % 2 != 0) or (marc < 2)
+        cortes = pairs >= 2
 
         if tipo == "Docente":
             worked = worked_pairs
             expected = 0
             saldo = 0
-            cumple = ""
+            cumple = "INCOMPLETO" if incompleto and marc > 0 else ""
         else:
-            worked = span if (marc >= 2 and pd.notna(first) and pd.notna(last)) else 0
+            # Normal: respeta pares reales. Varias marcaciones en un día suman todos los tramos.
+            worked = worked_pairs
+            expected, saldo, cumple = expected_and_saldo(
+                worked=worked,
+                expected_nodoc=expected_nodoc,
+                special=special,
+                has_mark=marc >= 1,
+            )
 
-            if day_is_special:
-                expected = 0
-                saldo = worked
-                if worked > 0 and not incompleto:
-                    cumple = "EXTRA"
-                elif worked > 0 and incompleto:
-                    cumple = "INCOMPLETO"
-                else:
-                    cumple = ""
-            else:
-                expected = expected_nodoc if marc >= 1 else 0
-                saldo = worked - expected if expected else 0
-
-                if expected and not incompleto:
-                    cumple = "OK" if saldo >= 0 else "FALTA"
-                elif expected and incompleto:
-                    cumple = "INCOMPLETO"
-                else:
-                    cumple = ""
+            if incompleto and marc > 0:
+                cumple = "INCOMPLETO"
 
         rows.append(
             {
@@ -758,8 +836,9 @@ def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set[da
                 "Empleado": emp,
                 "Tipo": tipo,
                 "Fecha": fecha_ts,
-                "Tipo_dia": day_type,
-                "Es_fin_de_semana": "SI" if day_is_special else "",
+                "Tipo_dia": tipo_dia,
+                "Es_fin_de_semana": "SI" if is_weekend(fecha_ts.date()) else "",
+                "Es_feriado": "SI" if is_holiday(fecha_ts.date(), holidays) else "",
                 "Primera": first,
                 "Ultima": last,
                 "Horas": minutes_to_hhmm(worked),
@@ -772,7 +851,8 @@ def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set[da
                 "Marcaciones": marc,
                 "Pares_estimados": int(pairs),
                 "Cortes": "SI" if cortes else "",
-                "Incompleto": "SI" if incompleto else "",
+                "Incompleto": "SI" if incompleto and marc > 0 else "",
+                "Ajuste_madrugada": "SI" if (g["Ajuste_madrugada"] == "SI").any() else "",
             }
         )
 
@@ -782,10 +862,17 @@ def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set[da
     return d.sort_values(["Tipo", "Empleado", "DNI", "Fecha"]).reset_index(drop=True)
 
 
-# =========================
+# ============================================================
 # CÁLCULO CHOFERES
-# =========================
+# ============================================================
 def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set[date]) -> pd.DataFrame:
+    """
+    Modo chofer:
+    - arma pares globales por empleado, sin resetear al cambiar el día.
+    - si marca hoy 14:00 y mañana 19:00, es un viaje continuo.
+    - dentro de cada viaje, solo las primeras 7h/6h normales cuentan como normales.
+    - sábados, domingos y feriados son extra siempre.
+    """
     rows = []
 
     for (ekey, dni, emp, tipo), g_emp in raw.groupby(
@@ -799,15 +886,18 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set[dat
                 rows.extend(g_doc.to_dict("records"))
             continue
 
-        times = g_emp["FechaHora"].tolist()
+        times = [t for t in g_emp["FechaHora"].tolist() if pd.notna(t)]
+        times.sort()
 
         raw_day_stats = {}
+        # Para mostrar en detalle diario usamos fecha laboral, no fecha calendario.
         for day, g_day in g_emp.groupby("Fecha"):
             g_day = g_day.sort_values("FechaHora")
             raw_day_stats[day] = {
                 "Marcaciones": int(g_day.shape[0]),
                 "Primera": g_day["FechaHora"].iloc[0] if not g_day.empty else pd.NaT,
                 "Ultima": g_day["FechaHora"].iloc[-1] if not g_day.empty else pd.NaT,
+                "Ajuste_madrugada": "SI" if (g_day["Ajuste_madrugada"] == "SI").any() else "",
             }
 
         day_worked = defaultdict(int)
@@ -839,18 +929,18 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set[dat
 
         unmatched_day = None
         if len(times) % 2 != 0:
-            unmatched_day = pd.to_datetime(times[-1]).date()
+            unmatched_day = get_work_date(pd.to_datetime(times[-1]))
 
         all_days = set(raw_day_stats.keys()) | set(day_worked.keys())
 
         for day in sorted(all_days):
             fecha_ts = pd.to_datetime(day)
-            special = is_special_day(day, holidays)
-            day_type = "FERIADO/FIN DE SEMANA" if special else "HÁBIL"
+            tipo_dia = day_type_label(day, holidays)
 
             marc = raw_day_stats.get(day, {}).get("Marcaciones", 0)
             first = raw_day_stats.get(day, {}).get("Primera", pd.NaT)
             last = raw_day_stats.get(day, {}).get("Ultima", pd.NaT)
+            ajuste_madrugada = raw_day_stats.get(day, {}).get("Ajuste_madrugada", "")
 
             worked = int(day_worked.get(day, 0))
             expected = int(day_expected.get(day, 0))
@@ -877,8 +967,9 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set[dat
                     "Empleado": emp,
                     "Tipo": tipo,
                     "Fecha": fecha_ts,
-                    "Tipo_dia": day_type,
-                    "Es_fin_de_semana": "SI" if special else "",
+                    "Tipo_dia": tipo_dia,
+                    "Es_fin_de_semana": "SI" if is_weekend(day) else "",
+                    "Es_feriado": "SI" if is_holiday(day, holidays) else "",
                     "Primera": first,
                     "Ultima": last,
                     "Horas": minutes_to_hhmm(worked),
@@ -892,6 +983,7 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set[dat
                     "Pares_estimados": int(pairs),
                     "Cortes": "SI" if cortes else "",
                     "Incompleto": "SI" if incompleto else "",
+                    "Ajuste_madrugada": ajuste_madrugada,
                 }
             )
 
@@ -907,15 +999,15 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int, holidays: set[date], driv
     return calc_daily_standard(raw, expected_nodoc, holidays)
 
 
-# =========================
+# ============================================================
 # CORRECCIÓN AUTOMÁTICA NO DOCENTE
-# =========================
+# ============================================================
 def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
     if raw_emp.empty:
         return raw_emp, 0
 
     corrected = raw_emp.copy()
-    corrected["Fecha"] = corrected["FechaHora"].dt.date
+    corrected["Fecha"] = corrected["FechaHora"].apply(get_work_date)
 
     fixes = []
     nfix = 0
@@ -924,7 +1016,7 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
         if len(times) == 1:
             t = times[0]
             fix_out = t + pd.to_timedelta(expected_nodoc, unit="m")
-            fixes.append({"FechaHora": fix_out, "Fecha": day})
+            fixes.append({"FechaHora": fix_out, "Fecha": get_work_date(fix_out)})
             nfix += 1
 
     if fixes:
@@ -933,7 +1025,9 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
         for f in fixes:
             row = template.copy()
             row["FechaHora"] = f["FechaHora"]
+            row["FechaReal"] = row["FechaHora"].date()
             row["Fecha"] = f["Fecha"]
+            row["Ajuste_madrugada"] = "SI" if row["Fecha"] != row["FechaReal"] else ""
             row["NvoEstado"] = "AUTO_FIX"
             row["Estado"] = row["FechaHora"].strftime("%d/%m/%Y %H:%M")
             fx_rows.append(row)
@@ -945,7 +1039,12 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
             .reset_index(drop=True)
         )
 
-    corrected["Fecha"] = corrected["FechaHora"].dt.date
+    corrected["FechaReal"] = corrected["FechaHora"].dt.date
+    corrected["Fecha"] = corrected["FechaHora"].apply(get_work_date)
+    corrected["Ajuste_madrugada"] = corrected.apply(
+        lambda r: "SI" if r["Fecha"] != r["FechaReal"] else "",
+        axis=1,
+    )
     return corrected, nfix
 
 
@@ -972,9 +1071,9 @@ def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple
     return out, total_fixes
 
 
-# =========================
-# RESÚMENES
-# =========================
+# ============================================================
+# RESÚMENES / TABLAS
+# ============================================================
 def summarize(daily: pd.DataFrame) -> pd.DataFrame:
     if daily.empty:
         return pd.DataFrame()
@@ -1002,6 +1101,9 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
             Dias_FALTA=("Cumple", lambda x: int((x == "FALTA").sum())),
             Dias_INCOMPL=("Cumple", lambda x: int((x == "INCOMPLETO").sum())),
             Dias_EXTRA=("Cumple", lambda x: int((x == "EXTRA").sum())),
+            Dias_Feriado=("Es_feriado", lambda x: int((x == "SI").sum()) if "Es_feriado" in daily.columns else 0),
+            Dias_Findes=("Es_fin_de_semana", lambda x: int((x == "SI").sum()) if "Es_fin_de_semana" in daily.columns else 0),
+            Dias_Madrugada=("Ajuste_madrugada", lambda x: int((x == "SI").sum()) if "Ajuste_madrugada" in daily.columns else 0),
         )
         .sort_values(["Tipo", "Empleado", "DNI"])
         .reset_index(drop=True)
@@ -1036,6 +1138,7 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
         "Incompletos",
         "Cortes",
         "Dias_OK", "Dias_FALTA", "Dias_INCOMPL", "Dias_EXTRA",
+        "Dias_Feriado", "Dias_Findes", "Dias_Madrugada",
     ]
     cols = [c for c in cols if c in s.columns]
     return s[cols]
@@ -1050,10 +1153,22 @@ def employee_detail_table(daily_emp: pd.DataFrame) -> pd.DataFrame:
     cols = [
         "Fecha", "Tipo_dia", "Primera", "Ultima",
         "Horas", "Esperado", "Saldo",
-        "Marcaciones", "Pares_estimados", "Cortes", "Incompleto", "Cumple"
+        "Marcaciones", "Pares_estimados", "Cortes", "Incompleto",
+        "Cumple", "Ajuste_madrugada"
     ]
     cols = [c for c in cols if c in d.columns]
     return d[cols].sort_values("Fecha").reset_index(drop=True)
+
+
+def raw_employee_marks_table(raw_emp: pd.DataFrame) -> pd.DataFrame:
+    if raw_emp.empty:
+        return pd.DataFrame()
+    out = raw_emp.copy()
+    out["Fecha_laboral"] = pd.to_datetime(out["Fecha"]).dt.strftime("%Y-%m-%d")
+    out["Fecha_real"] = pd.to_datetime(out["FechaReal"]).dt.strftime("%Y-%m-%d")
+    out["Hora"] = pd.to_datetime(out["FechaHora"], errors="coerce").dt.strftime("%H:%M")
+    cols = ["Empleado", "DNI", "Tipo", "Fecha_laboral", "Fecha_real", "Hora", "Ajuste_madrugada", "NvoEstado"]
+    return out[[c for c in cols if c in out.columns]].reset_index(drop=True)
 
 
 def pretty_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -1068,9 +1183,64 @@ def pretty_summary(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# =========================
+def build_extras_only(summary: pd.DataFrame) -> pd.DataFrame:
+    if summary.empty:
+        return pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"])
+    extras_only = summary[summary["Tipo"] == "NO Docente"].copy()
+    if extras_only.empty:
+        return pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"])
+    extras_only = (
+        extras_only[["Empleado", "DNI", "Tipo", "Extras", "Extras_min"]]
+        .rename(columns={"Extras": "Horas_extras"})
+        .sort_values("Extras_min", ascending=False)
+        .reset_index(drop=True)
+    )
+    extras_only["DNI"] = extras_only["DNI"].apply(display_dni)
+    return extras_only
+
+
+def build_rankings(summary: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if summary.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    ranking_hours = summary.copy().sort_values("Total_min", ascending=False).reset_index(drop=True)
+    ranking_hours = pretty_summary(ranking_hours).head(30)
+
+    ranking_extras = summary.copy().sort_values("Extras_min", ascending=False).reset_index(drop=True)
+    ranking_extras = pretty_summary(ranking_extras).head(30)
+
+    return ranking_hours, ranking_extras
+
+
+def build_inconsistencies(daily: pd.DataFrame) -> pd.DataFrame:
+    if daily.empty:
+        return pd.DataFrame()
+
+    mask = (
+        (daily.get("Incompleto", "") == "SI") |
+        (daily.get("Cortes", "") == "SI") |
+        (daily.get("Cumple", "") == "FALTA")
+    )
+    out = daily[mask].copy()
+    if out.empty:
+        return pd.DataFrame(columns=[
+            "Fecha", "Empleado", "DNI", "Tipo", "Tipo_dia", "Horas", "Esperado",
+            "Saldo", "Marcaciones", "Pares_estimados", "Cortes", "Incompleto", "Cumple"
+        ])
+    out["Fecha"] = pd.to_datetime(out["Fecha"]).dt.date
+    cols = [
+        "Fecha", "Empleado", "DNI", "Tipo", "Tipo_dia", "Horas", "Esperado",
+        "Saldo", "Marcaciones", "Pares_estimados", "Cortes", "Incompleto", "Cumple",
+        "Ajuste_madrugada"
+    ]
+    out = out[[c for c in cols if c in out.columns]]
+    out["DNI"] = out["DNI"].apply(display_dni)
+    return out.sort_values(["Fecha", "Empleado"]).reset_index(drop=True)
+
+
+# ============================================================
 # EXPORT EXCEL
-# =========================
+# ============================================================
 def _safe_table_name(name: str) -> str:
     base = re.sub(r"[^A-Za-z0-9_]", "_", name)
     if not base:
@@ -1104,7 +1274,10 @@ def _apply_excel_style(ws, table_name: str) -> None:
             showColumnStripes=False,
         )
         tab.tableStyleInfo = style
-        ws.add_table(tab)
+        try:
+            ws.add_table(tab)
+        except Exception:
+            pass
 
     for col in range(1, max_col + 1):
         letter = get_column_letter(col)
@@ -1124,6 +1297,9 @@ def export_general_excel(
     kpis_general: dict,
     summary_all: pd.DataFrame,
     extras_only: pd.DataFrame,
+    ranking_hours: pd.DataFrame,
+    ranking_extras: pd.DataFrame,
+    inconsistencies: pd.DataFrame,
     daily: pd.DataFrame,
     raw: pd.DataFrame,
 ) -> bytes:
@@ -1133,6 +1309,9 @@ def export_general_excel(
     def add_df(sheet_name: str, df: pd.DataFrame, text_cols: set[str] | None = None):
         text_cols = text_cols or set()
         ws = wb.create_sheet(sheet_name)
+
+        if df is None or df.empty:
+            df = pd.DataFrame(columns=["Sin_datos"])
 
         for j, col in enumerate(df.columns, start=1):
             ws.cell(row=1, column=j, value=str(col))
@@ -1151,6 +1330,7 @@ def export_general_excel(
         "Horario_reducido": "SI" if reduced else "NO",
         "Control_choferes": "SI" if driver_mode else "NO",
         "Esperado_NO_Docente": minutes_to_hhmm(expected),
+        "Corte_madrugada": f"00:00 a {WORKDAY_CUTOFF_HOUR - 1:02d}:59 cuenta como día laboral anterior",
         "Feriados_cargados": holidays_text.strip(),
         **kpis_general
     }])
@@ -1161,27 +1341,28 @@ def export_general_excel(
         summary_out["DNI"] = summary_out["DNI"].astype(str)
     add_df("Resumen_Empleados", summary_out, text_cols={"DNI", "EmployeeKey"})
 
-    extras_out = extras_only.copy()
-    if not extras_out.empty and "DNI" in extras_out.columns:
-        extras_out["DNI"] = extras_out["DNI"].astype(str)
-    add_df(
-        "Solo_Extras",
-        extras_out if not extras_out.empty else pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"]),
-        text_cols={"DNI"}
-    )
+    add_df("Solo_Extras", extras_only.copy(), text_cols={"DNI"})
+    add_df("Ranking_Horas", ranking_hours.copy(), text_cols={"DNI"})
+    add_df("Ranking_Extras", ranking_extras.copy(), text_cols={"DNI"})
+    add_df("Inconsistencias", inconsistencies.copy(), text_cols={"DNI"})
 
     daily_out = daily.copy()
-    daily_out["DNI"] = daily_out["DNI"].astype(str)
-    daily_out["Fecha"] = pd.to_datetime(daily_out["Fecha"]).dt.strftime("%Y-%m-%d")
-    daily_out["Primera"] = pd.to_datetime(daily_out["Primera"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
-    daily_out["Ultima"] = pd.to_datetime(daily_out["Ultima"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
+    if not daily_out.empty:
+        daily_out["DNI"] = daily_out["DNI"].astype(str)
+        daily_out["Fecha"] = pd.to_datetime(daily_out["Fecha"]).dt.strftime("%Y-%m-%d")
+        daily_out["Primera"] = pd.to_datetime(daily_out["Primera"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
+        daily_out["Ultima"] = pd.to_datetime(daily_out["Ultima"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
     add_df("Detalle_Diario", daily_out, text_cols={"DNI", "EmployeeKey"})
 
     raw_out = raw.copy()
-    raw_out["DNI"] = raw_out["DNI"].astype(str)
-    raw_out["Fecha"] = pd.to_datetime(raw_out["FechaHora"]).dt.strftime("%Y-%m-%d")
-    raw_out["Hora"] = pd.to_datetime(raw_out["FechaHora"]).dt.strftime("%H:%M")
-    raw_out = raw_out.sort_values(["Empleado", "DNI", "FechaHora"])[["EmployeeKey", "Empleado", "DNI", "Tipo", "Fecha", "Hora"]]
+    if not raw_out.empty:
+        raw_out["DNI"] = raw_out["DNI"].astype(str)
+        raw_out["Fecha_laboral"] = pd.to_datetime(raw_out["Fecha"]).dt.strftime("%Y-%m-%d")
+        raw_out["Fecha_real"] = pd.to_datetime(raw_out["FechaReal"]).dt.strftime("%Y-%m-%d")
+        raw_out["Hora"] = pd.to_datetime(raw_out["FechaHora"]).dt.strftime("%H:%M")
+        raw_out = raw_out.sort_values(["Empleado", "DNI", "FechaHora"])[
+            ["EmployeeKey", "Empleado", "DNI", "Tipo", "Fecha_laboral", "Fecha_real", "Hora", "Ajuste_madrugada"]
+        ]
     add_df("Marcaciones", raw_out, text_cols={"DNI", "EmployeeKey"})
 
     out = io.BytesIO()
@@ -1190,31 +1371,9 @@ def export_general_excel(
     return out.getvalue()
 
 
-# =========================
-# ESTADÍSTICAS
-# =========================
-def safe_pct(a: int, b: int) -> str:
-    if b <= 0:
-        return "0%"
-    return f"{(a / b * 100):.0f}%"
-
-
-def histogram_hours(series_minutes: pd.Series, bin_hours: list[tuple[float, float]]) -> pd.DataFrame:
-    hours = series_minutes.fillna(0).astype(int) / 60.0
-    rows = []
-    for lo, hi in bin_hours:
-        label = f"{lo:.0f}-{hi:.0f}H" if hi < 999 else f"{lo:.0f}H+"
-        if hi >= 999:
-            cnt = int((hours >= lo).sum())
-        else:
-            cnt = int(((hours >= lo) & (hours < hi)).sum())
-        rows.append({"Rango": label, "Días": cnt})
-    return pd.DataFrame(rows)
-
-
-# =========================
+# ============================================================
 # APP
-# =========================
+# ============================================================
 def main() -> None:
     st.set_page_config(page_title="CONTROL DE ASISTENCIA APP", page_icon="🫧", layout="wide")
     inject_css()
@@ -1282,9 +1441,6 @@ def main() -> None:
     expected = 360 if reduced else 420
     tabs = st.tabs(["GENERAL", "EMPLEADO", "PERFILES"])
 
-    # =======================
-    # GENERAL
-    # =======================
     with tabs[0]:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1296,7 +1452,10 @@ def main() -> None:
             with left:
                 fix_all = st.button("CORREGIR FALTAS DE MARCACIÓN (TODOS)", use_container_width=True)
             with right:
-                st.markdown("""<div class="pill">SOLO NO DOCENTES CON 1 MARCACIÓN</div>""", unsafe_allow_html=True)
+                st.markdown(
+                    f"""<div class="pill">MADRUGADA HASTA {WORKDAY_CUTOFF_HOUR - 1:02d}:59 = DÍA LABORAL ANTERIOR</div>""",
+                    unsafe_allow_html=True,
+                )
 
             if fix_all:
                 raw, fixes_total = correct_missing_punches_all(raw, expected)
@@ -1313,7 +1472,7 @@ def main() -> None:
         total_marc = int(daily["Marcaciones"].sum()) if not daily.empty else 0
         incompletos = int((daily["Incompleto"] == "SI").sum()) if not daily.empty else 0
         cortes = int((daily["Cortes"] == "SI").sum()) if not daily.empty else 0
-        total_registros_dia = int(daily.shape[0]) if not daily.empty else 0
+        madrugadas = int((daily["Ajuste_madrugada"] == "SI").sum()) if not daily.empty and "Ajuste_madrugada" in daily.columns else 0
 
         nod = daily[daily["Tipo"] == "NO Docente"].copy()
         nod_sum = int(nod["Minutos"].sum()) if not nod.empty else 0
@@ -1334,7 +1493,7 @@ def main() -> None:
         with r1[2]:
             kpi_card("MARCACIONES", f"{total_marc}", f"INCOMPLETOS: {incompletos}")
         with r1[3]:
-            kpi_card("CORTES", f"{cortes}", safe_pct(cortes, total_registros_dia))
+            kpi_card("MADRUGADAS", f"{madrugadas}", "SALIDAS ASIGNADAS AL DÍA ANTERIOR")
 
         r2 = st.columns(4)
         with r2[0]:
@@ -1348,20 +1507,28 @@ def main() -> None:
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        extras_only = summary[summary["Tipo"] == "NO Docente"].copy()
-        if not extras_only.empty:
-            extras_only = (
-                extras_only[["Empleado", "DNI", "Tipo", "Extras", "Extras_min"]]
-                .rename(columns={"Extras": "Horas_extras"})
-                .sort_values("Extras_min", ascending=False)
-                .reset_index(drop=True)
-            )
-            extras_only["DNI"] = extras_only["DNI"].apply(display_dni)
-        else:
-            extras_only = pd.DataFrame(columns=["Empleado", "DNI", "Tipo", "Horas_extras", "Extras_min"])
+        extras_only = build_extras_only(summary)
+        ranking_hours, ranking_extras = build_rankings(summary)
+        inconsistencies = build_inconsistencies(daily)
 
+        section_title("SOLO EXTRAS")
         copy_table_button(extras_only, "COPIAR SOLO EXTRAS", key="copy_extras")
-        st.table(extras_only)
+        st.dataframe(extras_only, use_container_width=True, height=260, hide_index=True)
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            section_title("RANKING POR HORAS TRABAJADAS")
+            st.dataframe(ranking_hours, use_container_width=True, height=360, hide_index=True)
+        with c2:
+            section_title("RANKING POR HORAS EXTRA")
+            st.dataframe(ranking_extras, use_container_width=True, height=360, hide_index=True)
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        section_title("INCONSISTENCIAS / FALTAS / MARCACIONES A REVISAR")
+        st.dataframe(inconsistencies, use_container_width=True, height=360, hide_index=True)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1372,6 +1539,7 @@ def main() -> None:
             "Prom_dia_HHMM": minutes_to_hhmm(prom_dia),
             "Incompletos": incompletos,
             "Cortes": cortes,
+            "Madrugadas_ajustadas": madrugadas,
             "NO_Docente_Total_HHMM": minutes_to_hhmm(nod_sum),
             "NO_Docente_Cumplimiento": nod_pct,
             "NO_Docente_Extras_HHMM": minutes_to_hhmm(nod_extras),
@@ -1387,6 +1555,9 @@ def main() -> None:
             kpis_general=kpis_general,
             summary_all=summary.copy(),
             extras_only=extras_only.copy(),
+            ranking_hours=ranking_hours.copy(),
+            ranking_extras=ranking_extras.copy(),
+            inconsistencies=inconsistencies.copy(),
             daily=daily.copy(),
             raw=raw.copy(),
         )
@@ -1401,17 +1572,7 @@ def main() -> None:
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        if not daily.empty:
-            by_day = daily.groupby("Fecha", as_index=False).agg(Minutos=("Minutos", "sum"))
-            by_day["Horas"] = by_day["Minutos"] / 60.0
-            by_day = by_day.sort_values("Fecha")
-            st.line_chart(by_day.set_index("Fecha")[["Horas"]], height=230)
-
-            hist = histogram_hours(daily["Minutos"], [(0, 2), (2, 4), (4, 6), (6, 8), (8, 10), (10, 999)]).set_index("Rango")
-            st.bar_chart(hist[["Días"]], height=230)
-
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
+        section_title("RESUMEN COMPLETO")
         summary_show = pretty_summary(summary)
         copy_table_button(summary_show, "COPIAR RESUMEN COMPLETO", key="copy_summary")
         st.dataframe(summary_show, use_container_width=True, height=560, hide_index=True)
@@ -1423,9 +1584,6 @@ def main() -> None:
         st.session_state["__driver_mode__"] = driver_mode
         st.session_state["__holidays__"] = holidays
 
-    # =======================
-    # EMPLEADO
-    # =======================
     with tabs[1]:
         raw = st.session_state.get("__raw__", None)
         daily = st.session_state.get("__daily__", None)
@@ -1475,6 +1633,7 @@ def main() -> None:
                     (daily_corrected["EmployeeKey"] == ekey) &
                     (daily_corrected["Tipo"] == tipo)
                 ].copy()
+                raw_emp = corrected_raw_emp.copy()
             else:
                 daily_emp = daily[
                     (daily["EmployeeKey"] == ekey) &
@@ -1539,19 +1698,18 @@ def main() -> None:
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        ch = daily_emp.sort_values("Fecha").copy()
-        ch["Horas_float"] = ch["Minutos"] / 60.0
-        st.bar_chart(ch.set_index("Fecha")[["Horas_float"]], height=240)
+        section_title("DETALLE DÍA A DÍA")
+        det = employee_detail_table(daily_emp)
+        copy_table_button(det, "COPIAR DETALLE DÍA A DÍA", key="copy_emp_detail")
+        st.dataframe(det, use_container_width=True, height=420, hide_index=True)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        det = employee_detail_table(daily_emp)
-        copy_table_button(det, "COPIAR DETALLE DÍA A DÍA", key="copy_emp_detail")
-        st.dataframe(det, use_container_width=True, height=560, hide_index=True)
+        section_title("MARCACIONES CRUDAS DEL EMPLEADO")
+        raw_det = raw_employee_marks_table(raw_emp)
+        copy_table_button(raw_det, "COPIAR MARCACIONES CRUDAS", key="copy_emp_raw")
+        st.dataframe(raw_det, use_container_width=True, height=420, hide_index=True)
 
-    # =======================
-    # PERFILES
-    # =======================
     with tabs[2]:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1579,3 +1737,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
