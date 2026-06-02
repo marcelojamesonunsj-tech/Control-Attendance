@@ -324,8 +324,8 @@ def hero_header() -> None:
     st.markdown(
         """
         <div class="hero-wrap">
-            <div class="hero-title">CONTROL DE ASISTENCIA</div>
-            <div class="hero-sub">Developed by Jameson Labs</div>
+            <div class="hero-title">CONTROL DE ASISTENCIA APP</div>
+            <div class="hero-sub">DESARROLLADA POR MARCELO JAMESON</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -427,15 +427,15 @@ def display_dni(value: str) -> str:
     return v if v else "SIN DNI"
 
 
-def get_work_date(dt: pd.Timestamp) -> date:
+def get_work_date(dt: pd.Timestamp, night_adjustment: bool = True) -> date:
     """
     Fecha laboral:
-    - 00:00 a 03:59 se considera día anterior.
-    - desde 04:00 se considera el mismo día.
+    - Si AJUSTE MADRUGADA está activo, 00:00 a 03:59 se considera día anterior.
+    - Si está apagado, se usa la fecha calendario real.
     """
     if pd.isna(dt):
         return date.today()
-    if int(dt.hour) < WORKDAY_CUTOFF_HOUR:
+    if night_adjustment and int(dt.hour) < WORKDAY_CUTOFF_HOUR:
         return (dt - pd.Timedelta(days=1)).date()
     return dt.date()
 
@@ -469,7 +469,7 @@ def validate_format(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
+def parse_and_clean(df: pd.DataFrame, night_adjustment: bool = True) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
@@ -526,7 +526,7 @@ def parse_and_clean(df: pd.DataFrame) -> pd.DataFrame:
 
     # Fecha real calendario y fecha laboral corregida.
     df["FechaReal"] = df["FechaHora"].dt.date
-    df["Fecha"] = df["FechaHora"].apply(get_work_date)
+    df["Fecha"] = df["FechaHora"].apply(lambda x: get_work_date(x, night_adjustment))
     df["Ajuste_madrugada"] = df.apply(
         lambda r: "SI" if r["Fecha"] != r["FechaReal"] else "",
         axis=1,
@@ -750,6 +750,33 @@ def pair_alternating(times: list[pd.Timestamp]) -> tuple[int, int]:
     return total, pairs
 
 
+def format_marks(times: list[pd.Timestamp]) -> str:
+    times = [t for t in times if pd.notna(t)]
+    times.sort()
+    if not times:
+        return ""
+    return " · ".join(pd.to_datetime(t).strftime("%H:%M") for t in times)
+
+
+def build_pair_details(times: list[pd.Timestamp]) -> str:
+    times = [t for t in times if pd.notna(t)]
+    times.sort()
+    details = []
+    for i in range(0, len(times) - 1, 2):
+        a, b = times[i], times[i + 1]
+        if b >= a:
+            mins = int((b - a).total_seconds() // 60)
+            details.append(f"{a.strftime('%H:%M')}-{b.strftime('%H:%M')} ({minutes_to_hhmm(mins)})")
+    return " | ".join(details)
+
+
+def split_balance(worked: int, expected: int, saldo: int) -> tuple[int, int, int]:
+    normal = min(max(worked, 0), max(expected, 0)) if expected > 0 else 0
+    extra = max(saldo, 0)
+    faltante = max(-saldo, 0)
+    return int(normal), int(extra), int(faltante)
+
+
 def split_interval_by_day(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Timestamp, int]]:
     chunks = []
     current = start
@@ -829,6 +856,8 @@ def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set[da
             if incompleto and marc > 0:
                 cumple = "INCOMPLETO"
 
+        normal_min, extra_min, faltante_min = split_balance(worked, expected, saldo)
+
         rows.append(
             {
                 "EmployeeKey": ekey,
@@ -843,6 +872,14 @@ def calc_daily_standard(raw: pd.DataFrame, expected_nodoc: int, holidays: set[da
                 "Ultima": last,
                 "Horas": minutes_to_hhmm(worked),
                 "Minutos": int(worked),
+                "Normal": minutes_to_hhmm(normal_min),
+                "Normal_min": int(normal_min),
+                "Extra_dia": minutes_to_hhmm(extra_min),
+                "Extra_dia_min": int(extra_min),
+                "Faltante_dia": minutes_to_hhmm(faltante_min),
+                "Faltante_dia_min": int(faltante_min),
+                "Marcaciones_detalle": format_marks(times),
+                "Tramos_detalle": build_pair_details(times),
                 "Esperado_min": int(expected),
                 "Esperado": minutes_to_hhmm(expected),
                 "Saldo_min": int(saldo),
@@ -960,6 +997,10 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set[dat
                 else:
                     cumple = ""
 
+            normal_min, extra_min, faltante_min = split_balance(worked, expected, saldo)
+            marks_today = g_emp[g_emp["Fecha"] == day]["FechaHora"].tolist() if "Fecha" in g_emp.columns else []
+            all_pair_details = build_pair_details(times)
+
             rows.append(
                 {
                     "EmployeeKey": ekey,
@@ -974,6 +1015,14 @@ def calc_daily_drivers(raw: pd.DataFrame, expected_nodoc: int, holidays: set[dat
                     "Ultima": last,
                     "Horas": minutes_to_hhmm(worked),
                     "Minutos": int(worked),
+                    "Normal": minutes_to_hhmm(normal_min),
+                    "Normal_min": int(normal_min),
+                    "Extra_dia": minutes_to_hhmm(extra_min),
+                    "Extra_dia_min": int(extra_min),
+                    "Faltante_dia": minutes_to_hhmm(faltante_min),
+                    "Faltante_dia_min": int(faltante_min),
+                    "Marcaciones_detalle": format_marks(marks_today),
+                    "Tramos_detalle": all_pair_details,
                     "Esperado_min": int(expected),
                     "Esperado": minutes_to_hhmm(expected),
                     "Saldo_min": int(saldo),
@@ -1002,12 +1051,12 @@ def calc_daily(raw: pd.DataFrame, expected_nodoc: int, holidays: set[date], driv
 # ============================================================
 # CORRECCIÓN AUTOMÁTICA NO DOCENTE
 # ============================================================
-def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
+def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: int, night_adjustment: bool = True) -> tuple[pd.DataFrame, int]:
     if raw_emp.empty:
         return raw_emp, 0
 
     corrected = raw_emp.copy()
-    corrected["Fecha"] = corrected["FechaHora"].apply(get_work_date)
+    corrected["Fecha"] = corrected["FechaHora"].apply(lambda x: get_work_date(x, night_adjustment))
 
     fixes = []
     nfix = 0
@@ -1016,7 +1065,7 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
         if len(times) == 1:
             t = times[0]
             fix_out = t + pd.to_timedelta(expected_nodoc, unit="m")
-            fixes.append({"FechaHora": fix_out, "Fecha": get_work_date(fix_out)})
+            fixes.append({"FechaHora": fix_out, "Fecha": get_work_date(fix_out, night_adjustment)})
             nfix += 1
 
     if fixes:
@@ -1040,7 +1089,7 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
         )
 
     corrected["FechaReal"] = corrected["FechaHora"].dt.date
-    corrected["Fecha"] = corrected["FechaHora"].apply(get_work_date)
+    corrected["Fecha"] = corrected["FechaHora"].apply(lambda x: get_work_date(x, night_adjustment))
     corrected["Ajuste_madrugada"] = corrected.apply(
         lambda r: "SI" if r["Fecha"] != r["FechaReal"] else "",
         axis=1,
@@ -1048,7 +1097,7 @@ def correct_missing_punches_for_employee(raw_emp: pd.DataFrame, expected_nodoc: 
     return corrected, nfix
 
 
-def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple[pd.DataFrame, int]:
+def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int, night_adjustment: bool = True) -> tuple[pd.DataFrame, int]:
     if raw.empty:
         return raw, 0
 
@@ -1061,7 +1110,7 @@ def correct_missing_punches_all(raw: pd.DataFrame, expected_nodoc: int) -> tuple
     total_fixes = 0
 
     for ekey, g in nodoc.groupby(["EmployeeKey"]):
-        corrected, nfix = correct_missing_punches_for_employee(g.copy(), expected_nodoc)
+        corrected, nfix = correct_missing_punches_for_employee(g.copy(), expected_nodoc, night_adjustment)
         fixed_parts.append(corrected)
         total_fixes += nfix
 
@@ -1097,6 +1146,9 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
             Saldo_min=("Saldo_min", "sum"),
             Extras_min=("Saldo_min", extras_pos),
             Faltas_min=("Saldo_min", faltas_pos),
+            Normal_min=("Normal_min", "sum"),
+            Extra_dia_min=("Extra_dia_min", "sum"),
+            Faltante_dia_min=("Faltante_dia_min", "sum"),
             Dias_OK=("Cumple", lambda x: int((x == "OK").sum())),
             Dias_FALTA=("Cumple", lambda x: int((x == "FALTA").sum())),
             Dias_INCOMPL=("Cumple", lambda x: int((x == "INCOMPLETO").sum())),
@@ -1114,6 +1166,9 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
     s["Prom/día"] = s["Prom_min"].round().astype(int).apply(minutes_to_hhmm)
     s["Extras"] = s["Extras_min"].apply(minutes_to_hhmm)
     s["Faltas"] = s["Faltas_min"].apply(minutes_to_hhmm)
+    s["Normal"] = s["Normal_min"].apply(minutes_to_hhmm) if "Normal_min" in s.columns else "00:00"
+    s["Extra_dia"] = s["Extra_dia_min"].apply(minutes_to_hhmm) if "Extra_dia_min" in s.columns else "00:00"
+    s["Faltante_dia"] = s["Faltante_dia_min"].apply(minutes_to_hhmm) if "Faltante_dia_min" in s.columns else "00:00"
     s["Saldo"] = s["Saldo_min"].apply(delta_short)
 
     def pct_row(r):
@@ -1129,9 +1184,12 @@ def summarize(daily: pd.DataFrame) -> pd.DataFrame:
         "Dias",
         "Total", "Total_min",
         "Prom/día",
+        "Normal", "Normal_min",
         "Esperado_min",
         "Extras", "Extras_min",
+        "Extra_dia", "Extra_dia_min",
         "Faltas", "Faltas_min",
+        "Faltante_dia", "Faltante_dia_min",
         "Saldo", "Saldo_min",
         "Cumplimiento",
         "Marcaciones",
@@ -1152,7 +1210,8 @@ def employee_detail_table(daily_emp: pd.DataFrame) -> pd.DataFrame:
 
     cols = [
         "Fecha", "Tipo_dia", "Primera", "Ultima",
-        "Horas", "Esperado", "Saldo",
+        "Marcaciones_detalle", "Tramos_detalle",
+        "Horas", "Normal", "Extra_dia", "Faltante_dia", "Esperado", "Saldo",
         "Marcaciones", "Pares_estimados", "Cortes", "Incompleto",
         "Cumple", "Ajuste_madrugada"
     ]
@@ -1229,7 +1288,8 @@ def build_inconsistencies(daily: pd.DataFrame) -> pd.DataFrame:
         ])
     out["Fecha"] = pd.to_datetime(out["Fecha"]).dt.date
     cols = [
-        "Fecha", "Empleado", "DNI", "Tipo", "Tipo_dia", "Horas", "Esperado",
+        "Fecha", "Empleado", "DNI", "Tipo", "Tipo_dia", "Marcaciones_detalle", "Tramos_detalle",
+        "Horas", "Normal", "Extra_dia", "Faltante_dia", "Esperado",
         "Saldo", "Marcaciones", "Pares_estimados", "Cortes", "Incompleto", "Cumple",
         "Ajuste_madrugada"
     ]
@@ -1382,12 +1442,14 @@ def main() -> None:
 
     with st.container():
         st.markdown('<div class="toolbar-wrap">', unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1, 1, 1])
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
         with col1:
             reduced = st.toggle("HORARIO REDUCIDO", value=False)
         with col2:
             driver_mode = st.toggle("CONTROL DE CHOFERES", value=False)
         with col3:
+            night_adjustment = st.toggle("AJUSTE MADRUGADA", value=True)
+        with col4:
             st.markdown(
                 f"""<div class="pill">JORNADA {"06:00" if reduced else "07:00"}</div>""",
                 unsafe_allow_html=True,
@@ -1435,7 +1497,7 @@ def main() -> None:
 
     df0 = read_excel_auto(file)
     df0 = validate_format(df0)
-    raw0 = parse_and_clean(df0)
+    raw0 = parse_and_clean(df0, night_adjustment=night_adjustment)
     _ = init_profiles(raw0)
 
     expected = 360 if reduced else 420
@@ -1458,7 +1520,7 @@ def main() -> None:
                 )
 
             if fix_all:
-                raw, fixes_total = correct_missing_punches_all(raw, expected)
+                raw, fixes_total = correct_missing_punches_all(raw, expected, night_adjustment)
                 st.markdown(f"""<div class="pill">CORRECCIONES APLICADAS: {fixes_total}</div>""", unsafe_allow_html=True)
 
         daily = calc_daily(raw, expected, holidays, driver_mode)
@@ -1531,6 +1593,23 @@ def main() -> None:
         st.dataframe(inconsistencies, use_container_width=True, height=360, hide_index=True)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+        section_title("DETALLE DÍA A DÍA GENERAL")
+        daily_show = daily.copy()
+        if not daily_show.empty:
+            daily_show["Fecha"] = pd.to_datetime(daily_show["Fecha"]).dt.date
+            daily_show["DNI"] = daily_show["DNI"].apply(display_dni)
+            daily_cols = [
+                "Fecha", "Empleado", "DNI", "Tipo", "Tipo_dia",
+                "Marcaciones_detalle", "Tramos_detalle",
+                "Horas", "Normal", "Extra_dia", "Faltante_dia", "Esperado", "Saldo",
+                "Marcaciones", "Pares_estimados", "Cortes", "Incompleto", "Cumple", "Ajuste_madrugada"
+            ]
+            daily_show = daily_show[[c for c in daily_cols if c in daily_show.columns]]
+        copy_table_button(daily_show, "COPIAR DETALLE DÍA A DÍA GENERAL", key="copy_daily_general")
+        st.dataframe(daily_show, use_container_width=True, height=420, hide_index=True)
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
 
         kpis_general = {
             "Empleados": empleados,
@@ -1583,6 +1662,7 @@ def main() -> None:
         st.session_state["__expected__"] = expected
         st.session_state["__driver_mode__"] = driver_mode
         st.session_state["__holidays__"] = holidays
+        st.session_state["__night_adjustment__"] = night_adjustment
 
     with tabs[1]:
         raw = st.session_state.get("__raw__", None)
@@ -1591,6 +1671,7 @@ def main() -> None:
         expected = st.session_state.get("__expected__", expected)
         driver_mode = st.session_state.get("__driver_mode__", driver_mode)
         holidays = st.session_state.get("__holidays__", holidays)
+        night_adjustment = st.session_state.get("__night_adjustment__", night_adjustment)
 
         if raw is None or daily is None or summary is None or summary.empty:
             st.info("CARGÁ UN EXCEL PARA VER ESTA SECCIÓN.")
@@ -1620,7 +1701,7 @@ def main() -> None:
         if tipo == "NO Docente" and not driver_mode:
             fix = st.button("CORREGIR FALTA DE MARCACIÓN", use_container_width=True)
             if fix:
-                corrected_raw_emp, fixes_applied = correct_missing_punches_for_employee(raw_emp, expected)
+                corrected_raw_emp, fixes_applied = correct_missing_punches_for_employee(raw_emp, expected, night_adjustment)
 
                 raw_corrected = raw.copy()
                 mask = (raw_corrected["EmployeeKey"] == ekey) & (raw_corrected["Tipo"] == tipo)
@@ -1737,5 +1818,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
