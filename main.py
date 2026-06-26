@@ -310,6 +310,66 @@ def inject_css() -> None:
             color: rgba(255,255,255,.88);
         }
 
+
+        .explain {
+            border: 1px solid rgba(255,255,255,.13);
+            border-radius: 18px;
+            padding: 12px 14px;
+            background: linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.035));
+            box-shadow: 0 8px 22px rgba(0,0,0,.12);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            margin: 8px 0 10px 0;
+        }
+
+        .explain .title {
+            font-size: .84rem;
+            font-weight: 900;
+            letter-spacing: .45px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,.93);
+            margin-bottom: 4px;
+        }
+
+        .explain .body {
+            font-size: .82rem;
+            line-height: 1.35;
+            color: rgba(255,255,255,.74);
+            text-transform: uppercase;
+            letter-spacing: .25px;
+        }
+
+        .mini-stat {
+            border: 1px solid rgba(255,255,255,.11);
+            border-radius: 18px;
+            padding: 12px 12px;
+            background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.035));
+            box-shadow: 0 8px 20px rgba(0,0,0,.12);
+            min-height: 92px;
+        }
+
+        .mini-stat .label {
+            font-size:.76rem;
+            font-weight:800;
+            color:rgba(255,255,255,.72);
+            text-transform:uppercase;
+            letter-spacing:.35px;
+        }
+
+        .mini-stat .value {
+            font-size:1.28rem;
+            font-weight:900;
+            color:#fff;
+            margin-top:5px;
+        }
+
+        .mini-stat .help {
+            font-size:.74rem;
+            color:rgba(255,255,255,.66);
+            margin-top:4px;
+            line-height:1.25;
+        }
+
         label, .st-emotion-cache-16txtl3, .st-emotion-cache-pkbazv {
             text-transform: uppercase !important;
             letter-spacing: .35px;
@@ -325,7 +385,7 @@ def hero_header() -> None:
         """
         <div class="hero-wrap">
             <div class="hero-title">CONTROL DE ASISTENCIA APP</div>
-            <div class="hero-sub">DEVELOPED BY M.JAMESON</div>
+            <div class="hero-sub">DESARROLLADA POR MARCELO JAMESON</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -339,6 +399,31 @@ def kpi_card(label: str, value: str, sub: str = "") -> None:
             <div class="label">{html.escape(str(label))}</div>
             <div class="value">{html.escape(str(value))}</div>
             <div class="sub">{html.escape(str(sub))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def explain_box(title: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="explain">
+            <div class="title">{html.escape(str(title))}</div>
+            <div class="body">{html.escape(str(body))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def mini_stat(label: str, value: str, help_text: str = "") -> None:
+    st.markdown(
+        f"""
+        <div class="mini-stat">
+            <div class="label">{html.escape(str(label))}</div>
+            <div class="value">{html.escape(str(value))}</div>
+            <div class="help">{html.escape(str(help_text))}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1298,6 +1383,122 @@ def build_inconsistencies(daily: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["Fecha", "Empleado"]).reset_index(drop=True)
 
 
+def calculate_general_indicators(daily: pd.DataFrame, summary: pd.DataFrame) -> dict:
+    if daily is None or daily.empty:
+        return {
+            "dias_empleado": 0, "dias_ok": 0, "dias_falta": 0, "dias_extra": 0,
+            "dias_incompletos": 0, "dias_cortes": 0, "dias_feriado": 0,
+            "dias_findes": 0, "dias_madrugada": 0, "empleados_con_extra": 0,
+            "empleados_con_falta": 0, "prom_extra_por_empleado": 0,
+            "prom_horas_por_dia_empleado": 0, "mayor_extra_min": 0, "mayor_total_min": 0,
+        }
+
+    nod = daily[daily["Tipo"] == "NO Docente"].copy() if "Tipo" in daily.columns else daily.copy()
+    dias_empleado = int(daily.shape[0])
+    dias_ok = int((daily.get("Cumple", "") == "OK").sum())
+    dias_falta = int((daily.get("Cumple", "") == "FALTA").sum())
+    dias_extra = int((daily.get("Cumple", "") == "EXTRA").sum())
+    dias_incompletos = int((daily.get("Incompleto", "") == "SI").sum())
+    dias_cortes = int((daily.get("Cortes", "") == "SI").sum())
+    dias_feriado = int((daily.get("Es_feriado", "") == "SI").sum()) if "Es_feriado" in daily.columns else 0
+    dias_findes = int((daily.get("Es_fin_de_semana", "") == "SI").sum()) if "Es_fin_de_semana" in daily.columns else 0
+    dias_madrugada = int((daily.get("Ajuste_madrugada", "") == "SI").sum()) if "Ajuste_madrugada" in daily.columns else 0
+
+    empleados_con_extra = 0
+    empleados_con_falta = 0
+    prom_extra_por_empleado = 0
+    mayor_extra_min = 0
+    mayor_total_min = 0
+    if summary is not None and not summary.empty:
+        empleados_con_extra = int((summary.get("Extras_min", 0) > 0).sum())
+        empleados_con_falta = int((summary.get("Faltas_min", 0) > 0).sum())
+        prom_extra_por_empleado = int(round(summary.get("Extras_min", pd.Series(dtype=int)).mean())) if "Extras_min" in summary.columns else 0
+        mayor_extra_min = int(summary.get("Extras_min", pd.Series([0])).max()) if "Extras_min" in summary.columns else 0
+        mayor_total_min = int(summary.get("Total_min", pd.Series([0])).max()) if "Total_min" in summary.columns else 0
+
+    prom_horas_por_dia_empleado = int(round(daily.get("Minutos", pd.Series(dtype=int)).mean())) if "Minutos" in daily.columns else 0
+
+    return {
+        "dias_empleado": dias_empleado,
+        "dias_ok": dias_ok,
+        "dias_falta": dias_falta,
+        "dias_extra": dias_extra,
+        "dias_incompletos": dias_incompletos,
+        "dias_cortes": dias_cortes,
+        "dias_feriado": dias_feriado,
+        "dias_findes": dias_findes,
+        "dias_madrugada": dias_madrugada,
+        "empleados_con_extra": empleados_con_extra,
+        "empleados_con_falta": empleados_con_falta,
+        "prom_extra_por_empleado": prom_extra_por_empleado,
+        "prom_horas_por_dia_empleado": prom_horas_por_dia_empleado,
+        "mayor_extra_min": mayor_extra_min,
+        "mayor_total_min": mayor_total_min,
+    }
+
+
+def build_daily_explained_table(daily: pd.DataFrame) -> pd.DataFrame:
+    if daily is None or daily.empty:
+        return pd.DataFrame()
+
+    out = daily.copy()
+    out["Fecha"] = pd.to_datetime(out["Fecha"]).dt.date
+    out["DNI"] = out["DNI"].apply(display_dni)
+
+    def explanation(r):
+        tipo_dia = str(r.get("Tipo_dia", ""))
+        horas = str(r.get("Horas", "00:00"))
+        normal = str(r.get("Normal", "00:00"))
+        extra = str(r.get("Extra_dia", "00:00"))
+        faltante = str(r.get("Faltante_dia", "00:00"))
+        marcas = str(r.get("Marcaciones_detalle", ""))
+        tramos = str(r.get("Tramos_detalle", ""))
+
+        if r.get("Incompleto", "") == "SI":
+            return f"REVISAR: CANTIDAD IMPAR O FALTA DE MARCACIÓN. MARCAS: {marcas}"
+        if tipo_dia in ["FERIADO", "FIN DE SEMANA", "FERIADO/FIN DE SEMANA"]:
+            return f"DÍA ESPECIAL: TODO LO TRABAJADO ({horas}) CUENTA COMO EXTRA. MARCAS: {marcas}"
+        if extra != "00:00":
+            return f"TRABAJÓ {horas}. PRIMERO SE CUBRE LA JORNADA NORMAL ({normal}) Y EL RESTO ES EXTRA ({extra}). TRAMOS: {tramos}"
+        if faltante != "00:00":
+            return f"TRABAJÓ {horas}. LE FALTÓ {faltante} PARA COMPLETAR LA JORNADA. TRAMOS: {tramos}"
+        return f"TRABAJÓ {horas}. CUMPLIÓ LA JORNADA ESPERADA. TRAMOS: {tramos}"
+
+    out["Explicacion_calculo"] = out.apply(explanation, axis=1)
+
+    cols = [
+        "Fecha", "Empleado", "DNI", "Tipo", "Tipo_dia",
+        "Marcaciones_detalle", "Tramos_detalle",
+        "Horas", "Normal", "Extra_dia", "Faltante_dia", "Esperado", "Saldo",
+        "Marcaciones", "Pares_estimados", "Cortes", "Incompleto", "Cumple",
+        "Ajuste_madrugada", "Explicacion_calculo"
+    ]
+    return out[[c for c in cols if c in out.columns]].sort_values(["Fecha", "Empleado"]).reset_index(drop=True)
+
+
+def build_employee_explained_stats(daily_emp: pd.DataFrame) -> dict:
+    if daily_emp is None or daily_emp.empty:
+        return {}
+    total = int(daily_emp["Minutos"].sum())
+    normal = int(daily_emp.get("Normal_min", pd.Series([0]*len(daily_emp))).sum()) if "Normal_min" in daily_emp.columns else 0
+    extra = int(daily_emp.get("Extra_dia_min", pd.Series([0]*len(daily_emp))).sum()) if "Extra_dia_min" in daily_emp.columns else int(daily_emp.loc[daily_emp["Saldo_min"] > 0, "Saldo_min"].sum())
+    faltante = int(daily_emp.get("Faltante_dia_min", pd.Series([0]*len(daily_emp))).sum()) if "Faltante_dia_min" in daily_emp.columns else int((-daily_emp.loc[daily_emp["Saldo_min"] < 0, "Saldo_min"].sum()))
+    dias = int(daily_emp["Fecha"].nunique())
+    marcas = int(daily_emp["Marcaciones"].sum())
+    cortes = int((daily_emp.get("Cortes", "") == "SI").sum())
+    incompletos = int((daily_emp.get("Incompleto", "") == "SI").sum())
+    feriados = int((daily_emp.get("Es_feriado", "") == "SI").sum()) if "Es_feriado" in daily_emp.columns else 0
+    findes = int((daily_emp.get("Es_fin_de_semana", "") == "SI").sum()) if "Es_fin_de_semana" in daily_emp.columns else 0
+    madrugada = int((daily_emp.get("Ajuste_madrugada", "") == "SI").sum()) if "Ajuste_madrugada" in daily_emp.columns else 0
+    prom = int(round(daily_emp["Minutos"].mean())) if dias else 0
+
+    return {
+        "total": total, "normal": normal, "extra": extra, "faltante": faltante,
+        "dias": dias, "marcas": marcas, "cortes": cortes, "incompletos": incompletos,
+        "feriados": feriados, "findes": findes, "madrugada": madrugada, "prom": prom
+    }
+
+
 # ============================================================
 # EXPORT EXCEL
 # ============================================================
@@ -1525,6 +1726,7 @@ def main() -> None:
 
         daily = calc_daily(raw, expected, holidays, driver_mode)
         summary = summarize(daily)
+        indicators = calculate_general_indicators(daily, summary)
 
         total_min = int(daily["Minutos"].sum()) if not daily.empty else 0
         empleados = int(summary.shape[0]) if not summary.empty else 0
@@ -1567,6 +1769,31 @@ def main() -> None:
         with r2[3]:
             kpi_card("DOCENTE", minutes_to_hhmm(doc_sum), "POR TRAMOS")
 
+        explain_box(
+            "CÓMO LEER LOS NÚMEROS",
+            "TOTAL ES LA SUMA DE HORAS TRABAJADAS. NORMAL ES LO CUBIERTO DENTRO DE LA JORNADA. EXTRA ES LO QUE SUPERA LA JORNADA O TODO LO TRABAJADO EN FERIADOS/FINES DE SEMANA. SALDO ES EXTRA MENOS FALTANTE."
+        )
+
+        r3 = st.columns(4)
+        with r3[0]:
+            mini_stat("DÍAS OK", f"{indicators['dias_ok']}", "DÍAS HÁBILES DONDE SE CUBRIÓ LA JORNADA.")
+        with r3[1]:
+            mini_stat("DÍAS CON EXTRA", f"{indicators['dias_extra']}", "DÍAS ESPECIALES O DÍAS CON SALDO POSITIVO.")
+        with r3[2]:
+            mini_stat("EMPLEADOS CON EXTRA", f"{indicators['empleados_con_extra']}", "PERSONAS QUE SUMARON AL MENOS 1 MINUTO EXTRA.")
+        with r3[3]:
+            mini_stat("EMPLEADOS CON FALTANTE", f"{indicators['empleados_con_falta']}", "PERSONAS CON MINUTOS POR DEBAJO DE LO ESPERADO.")
+
+        r4 = st.columns(4)
+        with r4[0]:
+            mini_stat("PROMEDIO POR DÍA", minutes_to_hhmm(indicators["prom_horas_por_dia_empleado"]), "PROMEDIO DE HORAS POR REGISTRO DÍA/EMPLEADO.")
+        with r4[1]:
+            mini_stat("PROMEDIO EXTRA/EMPLEADO", minutes_to_hhmm(indicators["prom_extra_por_empleado"]), "PROMEDIO DE EXTRAS ENTRE EMPLEADOS.")
+        with r4[2]:
+            mini_stat("MAYOR EXTRA INDIVIDUAL", minutes_to_hhmm(indicators["mayor_extra_min"]), "EL EMPLEADO QUE MÁS EXTRA ACUMULÓ.")
+        with r4[3]:
+            mini_stat("MAYOR TOTAL INDIVIDUAL", minutes_to_hhmm(indicators["mayor_total_min"]), "EL EMPLEADO QUE MÁS HORAS TRABAJÓ.")
+
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         extras_only = build_extras_only(summary)
@@ -1574,6 +1801,7 @@ def main() -> None:
         inconsistencies = build_inconsistencies(daily)
 
         section_title("SOLO EXTRAS")
+        explain_box("SOLO EXTRAS", "LISTA ÚNICAMENTE NO DOCENTES CON HORAS EXTRA ACUMULADAS. EXTRAS SALE DEL SALDO POSITIVO DE CADA DÍA.")
         copy_table_button(extras_only, "COPIAR SOLO EXTRAS", key="copy_extras")
         st.dataframe(extras_only, use_container_width=True, height=260, hide_index=True)
 
@@ -1582,31 +1810,28 @@ def main() -> None:
         c1, c2 = st.columns(2)
         with c1:
             section_title("RANKING POR HORAS TRABAJADAS")
+            explain_box("RANKING POR HORAS TRABAJADAS", "ORDENA DE MAYOR A MENOR SEGÚN EL TOTAL TRABAJADO DEL PERÍODO CARGADO.")
             st.dataframe(ranking_hours, use_container_width=True, height=360, hide_index=True)
         with c2:
             section_title("RANKING POR HORAS EXTRA")
+            explain_box("RANKING POR HORAS EXTRA", "ORDENA DE MAYOR A MENOR SEGÚN EL TOTAL DE HORAS EXTRA ACUMULADAS.")
             st.dataframe(ranking_extras, use_container_width=True, height=360, hide_index=True)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         section_title("INCONSISTENCIAS / FALTAS / MARCACIONES A REVISAR")
+        explain_box("INCONSISTENCIAS", "MUESTRA DÍAS CON FALTANTES, MARCACIONES IMPARES, CORTES O CASOS QUE CONVIENE REVISAR MANUALMENTE.")
         st.dataframe(inconsistencies, use_container_width=True, height=360, hide_index=True)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
         section_title("DETALLE DÍA A DÍA GENERAL")
-        daily_show = daily.copy()
-        if not daily_show.empty:
-            daily_show["Fecha"] = pd.to_datetime(daily_show["Fecha"]).dt.date
-            daily_show["DNI"] = daily_show["DNI"].apply(display_dni)
-            daily_cols = [
-                "Fecha", "Empleado", "DNI", "Tipo", "Tipo_dia",
-                "Marcaciones_detalle", "Tramos_detalle",
-                "Horas", "Normal", "Extra_dia", "Faltante_dia", "Esperado", "Saldo",
-                "Marcaciones", "Pares_estimados", "Cortes", "Incompleto", "Cumple", "Ajuste_madrugada"
-            ]
-            daily_show = daily_show[[c for c in daily_cols if c in daily_show.columns]]
+        explain_box(
+            "QUÉ MUESTRA ESTA TABLA",
+            "ACÁ ESTÁ EL CÁLCULO DÍA POR DÍA: TODAS LAS MARCACIONES, LOS TRAMOS REALES, HORAS NORMALES, EXTRAS, FALTANTES Y UNA EXPLICACIÓN DEL CÁLCULO."
+        )
+        daily_show = build_daily_explained_table(daily)
         copy_table_button(daily_show, "COPIAR DETALLE DÍA A DÍA GENERAL", key="copy_daily_general")
-        st.dataframe(daily_show, use_container_width=True, height=420, hide_index=True)
+        st.dataframe(daily_show, use_container_width=True, height=460, hide_index=True)
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1652,6 +1877,7 @@ def main() -> None:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         section_title("RESUMEN COMPLETO")
+        explain_box("RESUMEN COMPLETO", "UN EMPLEADO POR FILA. TOTAL, NORMAL, EXTRA, FALTANTE Y SALDO ACUMULADO DEL PERÍODO.")
         summary_show = pretty_summary(summary)
         copy_table_button(summary_show, "COPIAR RESUMEN COMPLETO", key="copy_summary")
         st.dataframe(summary_show, use_container_width=True, height=560, hide_index=True)
@@ -1765,14 +1991,38 @@ def main() -> None:
 
         r2 = st.columns(3)
         with r2[0]:
-            kpi_card("INCOMPLETOS", f"{inc}", "")
+            kpi_card("INCOMPLETOS", f"{inc}", "DÍAS CON MARCAS IMPARES O FALTANTES")
         with r2[1]:
-            kpi_card("CORTES", f"{cuts}", "")
+            kpi_card("CORTES", f"{cuts}", "DÍAS CON MÁS DE UN TRAMO")
         with r2[2]:
             if tipo == "NO Docente":
-                kpi_card("SALDO", delta_short(saldo_sum), "ACUMULADO")
+                kpi_card("SALDO", delta_short(saldo_sum), "EXTRA MENOS FALTANTE")
             else:
                 kpi_card("SALDO", "—", "")
+
+        emp_stats = build_employee_explained_stats(daily_emp)
+        explain_box(
+            "LECTURA DEL EMPLEADO",
+            "NORMAL ES LA PARTE QUE CUBRE LA JORNADA. EXTRA ES LO QUE SOBRA O TODO LO TRABAJADO EN FERIADO/FIN DE SEMANA. FALTANTE ES LO QUE NO LLEGÓ A CUBRIR EN DÍA HÁBIL."
+        )
+        r3e = st.columns(4)
+        with r3e[0]:
+            mini_stat("HORAS NORMALES", minutes_to_hhmm(emp_stats.get("normal", 0)), "SUMA DE HORAS DENTRO DE LA JORNADA.")
+        with r3e[1]:
+            mini_stat("HORAS EXTRA", minutes_to_hhmm(emp_stats.get("extra", 0)), "SOBRANTE DEL DÍA O DÍA ESPECIAL.")
+        with r3e[2]:
+            mini_stat("HORAS FALTANTES", minutes_to_hhmm(emp_stats.get("faltante", 0)), "MINUTOS QUE FALTARON EN DÍAS HÁBILES.")
+        with r3e[3]:
+            mini_stat("PROMEDIO DIARIO", minutes_to_hhmm(emp_stats.get("prom", 0)), "PROMEDIO TRABAJADO POR DÍA.")
+        r4e = st.columns(4)
+        with r4e[0]:
+            mini_stat("DÍAS FERIADO", f"{emp_stats.get('feriados', 0)}", "DÍAS MARCADOS COMO FERIADO.")
+        with r4e[1]:
+            mini_stat("DÍAS FINDE", f"{emp_stats.get('findes', 0)}", "SÁBADOS Y DOMINGOS TRABAJADOS.")
+        with r4e[2]:
+            mini_stat("AJUSTES MADRUGADA", f"{emp_stats.get('madrugada', 0)}", "SALIDAS TOMADAS COMO DÍA ANTERIOR.")
+        with r4e[3]:
+            mini_stat("TOTAL MARCAS", f"{emp_stats.get('marcas', 0)}", "TODAS LAS MARCACIONES CRUDAS.")
 
         if fixes_applied:
             st.markdown(f"""<div class="pill">CORRECCIONES APLICADAS: {fixes_applied}</div>""", unsafe_allow_html=True)
@@ -1780,6 +2030,7 @@ def main() -> None:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         section_title("DETALLE DÍA A DÍA")
+        explain_box("DETALLE DÍA A DÍA", "MUESTRA CADA DÍA DEL EMPLEADO CON TODAS LAS MARCACIONES, TRAMOS, NORMAL, EXTRA, FALTANTE Y SALDO.")
         det = employee_detail_table(daily_emp)
         copy_table_button(det, "COPIAR DETALLE DÍA A DÍA", key="copy_emp_detail")
         st.dataframe(det, use_container_width=True, height=420, hide_index=True)
@@ -1787,6 +2038,7 @@ def main() -> None:
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         section_title("MARCACIONES CRUDAS DEL EMPLEADO")
+        explain_box("MARCACIONES CRUDAS", "LISTA TODAS LAS MARCAS ORIGINALES DEL RELOJ, SIN RESUMIR. SIRVE PARA AUDITAR EL CÁLCULO.")
         raw_det = raw_employee_marks_table(raw_emp)
         copy_table_button(raw_det, "COPIAR MARCACIONES CRUDAS", key="copy_emp_raw")
         st.dataframe(raw_det, use_container_width=True, height=420, hide_index=True)
@@ -1818,4 +2070,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
