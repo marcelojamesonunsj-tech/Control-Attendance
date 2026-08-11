@@ -132,38 +132,114 @@ def inject_css() -> None:
             border: 1px solid rgba(255,255,255,0.14);
             border-radius: 22px;
             padding: 16px 16px;
-            min-height: 112px;
-            background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
-            box-shadow: 0 10px 28px rgba(0,0,0,.16);
-            backdrop-filter: blur(14px) saturate(155%);
-            -webkit-backdrop-filter: blur(14px) saturate(155%);
+            min-height: 132px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            background: linear-gradient(180deg, rgba(255,255,255,.105), rgba(255,255,255,.045));
+            box-shadow: 0 12px 30px rgba(0,0,0,.18);
+            backdrop-filter: blur(16px) saturate(160%);
+            -webkit-backdrop-filter: blur(16px) saturate(160%);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .kpi::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: rgba(121,184,255,.72);
+        }
+
+        .kpi.positive::before { background: rgba(111,232,181,.90); }
+        .kpi.negative::before { background: rgba(255,128,128,.90); }
+        .kpi.warning::before  { background: rgba(255,207,112,.92); }
+        .kpi.neutral::before  { background: rgba(121,184,255,.75); }
+
+        .kpi.positive {
+            background: linear-gradient(180deg, rgba(73,170,128,.15), rgba(255,255,255,.045));
+        }
+
+        .kpi.negative {
+            background: linear-gradient(180deg, rgba(190,75,75,.14), rgba(255,255,255,.045));
+        }
+
+        .kpi.warning {
+            background: linear-gradient(180deg, rgba(190,145,65,.14), rgba(255,255,255,.045));
         }
 
         .kpi .label {
-            opacity: .82;
-            font-size: .86rem;
-            font-weight: 700;
-            color: rgba(255,255,255,.80);
+            opacity: .86;
+            font-size: .82rem;
+            font-weight: 800;
+            color: rgba(255,255,255,.82);
             text-transform: uppercase;
-            letter-spacing: .5px;
+            letter-spacing: .55px;
+            min-height: 30px;
         }
 
         .kpi .value {
-            font-size: 1.72rem;
-            font-weight: 900;
-            line-height: 1.06;
-            margin-top: 8px;
+            font-size: clamp(1.35rem, 2vw, 1.82rem);
+            font-weight: 950;
+            line-height: 1.04;
+            margin-top: 9px;
             color:#FFFFFF;
             text-transform: uppercase;
+            word-break: break-word;
         }
 
         .kpi .sub {
-            opacity: .72;
-            font-size: .82rem;
-            margin-top: .35rem;
-            color: rgba(255,255,255,.72);
+            opacity: .74;
+            font-size: .76rem;
+            margin-top: .55rem;
+            color: rgba(255,255,255,.74);
             text-transform: uppercase;
-            letter-spacing: .35px;
+            letter-spacing: .32px;
+            line-height: 1.25;
+            min-height: 30px;
+        }
+
+        .balance-hero {
+            border: 1px solid rgba(255,255,255,.16);
+            border-radius: 24px;
+            padding: 18px 20px;
+            margin: 10px 0 16px 0;
+            background:
+                radial-gradient(circle at 12% 20%, rgba(121,184,255,.18), transparent 34%),
+                linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.045));
+            box-shadow: 0 14px 34px rgba(0,0,0,.18);
+            backdrop-filter: blur(18px) saturate(165%);
+            -webkit-backdrop-filter: blur(18px) saturate(165%);
+        }
+
+        .balance-hero .eyebrow {
+            font-size: .74rem;
+            font-weight: 900;
+            color: rgba(255,255,255,.68);
+            letter-spacing: .7px;
+            text-transform: uppercase;
+        }
+
+        .balance-hero .main {
+            margin-top: 5px;
+            font-size: 1.75rem;
+            font-weight: 950;
+            color: #fff;
+            letter-spacing: .2px;
+            text-transform: uppercase;
+        }
+
+        .balance-hero .desc {
+            margin-top: 7px;
+            font-size: .84rem;
+            line-height: 1.42;
+            color: rgba(255,255,255,.76);
+            text-transform: uppercase;
+            letter-spacing: .3px;
         }
 
         .pill {
@@ -396,10 +472,11 @@ def hero_header() -> None:
     )
 
 
-def kpi_card(label: str, value: str, sub: str = "") -> None:
+def kpi_card(label: str, value: str, sub: str = "", tone: str = "neutral") -> None:
+    tone = tone if tone in {"neutral", "positive", "negative", "warning"} else "neutral"
     st.markdown(
         f"""
-        <div class="kpi">
+        <div class="kpi {tone}">
             <div class="label">{html.escape(str(label))}</div>
             <div class="value">{html.escape(str(value))}</div>
             <div class="sub">{html.escape(str(sub))}</div>
@@ -415,6 +492,37 @@ def explain_box(title: str, body: str) -> None:
         <div class="explain">
             <div class="title">{html.escape(str(title))}</div>
             <div class="body">{html.escape(str(body))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def balance_hero(balance_minutes: int) -> None:
+    if balance_minutes > 0:
+        main_text = f"{minutes_to_hhmm(balance_minutes)} A FAVOR"
+        desc = (
+            "EL EMPLEADO YA COMPENSÓ SUS HORAS FALTANTES DEL PERÍODO Y CONSERVA ESTE EXCEDENTE "
+            "COMO SALDO POSITIVO."
+        )
+    elif balance_minutes < 0:
+        main_text = f"{minutes_to_hhmm(abs(balance_minutes))} POR COMPENSAR"
+        desc = (
+            "LAS HORAS EXTRA GENERADAS TODAVÍA NO ALCANZAN PARA CUBRIR LAS SALIDAS TEMPRANAS "
+            "DEL PERÍODO. ESTE ES EL TIEMPO PENDIENTE."
+        )
+    else:
+        main_text = "BALANCE EN CERO"
+        desc = (
+            "LAS HORAS EXTRA Y LAS HORAS FALTANTES DEL PERÍODO SE COMPENSAN EXACTAMENTE."
+        )
+
+    st.markdown(
+        f"""
+        <div class="balance-hero">
+            <div class="eyebrow">BALANCE REAL DEL PERÍODO</div>
+            <div class="main">{html.escape(main_text)}</div>
+            <div class="desc">{html.escape(desc)}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1777,30 +1885,34 @@ def compact_employee_summary(
         employee_key = str(item["EmployeeKey"])
         daily_emp = daily[daily["EmployeeKey"].astype(str) == employee_key].copy()
 
-        complete_days = daily_emp[daily_emp["Incompleto"] != "SI"].copy()
+        valid_days = daily_emp[daily_emp["Incompleto"] != "SI"].copy()
+
         arrival_average = (
-            average_clock_time(complete_days["Primera"])
-            if not complete_days.empty
+            average_clock_time(valid_days["Primera"])
+            if not valid_days.empty
             else "—"
         )
         departure_average = (
-            average_clock_time(complete_days["Ultima"], overnight_as_next_day=True)
-            if not complete_days.empty
+            average_clock_time(valid_days["Ultima"], overnight_as_next_day=True)
+            if not valid_days.empty
             else "—"
         )
 
-        valid_days = daily_emp[daily_emp["Incompleto"] != "SI"].copy()
-
-        extra_minutes = (
-            int(daily_emp["Extra_dia_min"].sum())
-            if "Extra_dia_min" in daily_emp.columns
-            else int(item.get("Extras_min", 0))
+        gross_extra = (
+            int(valid_days["Extra_dia_min"].sum())
+            if not valid_days.empty and "Extra_dia_min" in valid_days.columns
+            else 0
         )
         missing_minutes = (
             int(valid_days["Faltante_dia_min"].sum())
-            if "Faltante_dia_min" in valid_days.columns
+            if not valid_days.empty and "Faltante_dia_min" in valid_days.columns
             else 0
         )
+
+        net_balance = gross_extra - missing_minutes
+        extra_favor = max(net_balance, 0)
+        debt_pending = max(-net_balance, 0)
+
         normal_minutes = (
             int(daily_emp["Normal_min"].sum())
             if "Normal_min" in daily_emp.columns
@@ -1811,9 +1923,14 @@ def compact_employee_summary(
             if not daily_emp.empty
             else int(item.get("Total_min", 0))
         )
+        expected_minutes = (
+            int(valid_days["Esperado_min"].sum())
+            if not valid_days.empty and "Esperado_min" in valid_days.columns
+            else 0
+        )
 
         incomplete_days = int((daily_emp["Incompleto"] == "SI").sum()) if not daily_emp.empty else 0
-        days_with_extra = int((daily_emp["Extra_dia_min"] > 0).sum()) if "Extra_dia_min" in daily_emp.columns else 0
+        days_with_extra = int((valid_days["Extra_dia_min"] > 0).sum()) if "Extra_dia_min" in valid_days.columns else 0
         days_with_missing_hours = int((valid_days["Faltante_dia_min"] > 0).sum()) if "Faltante_dia_min" in valid_days.columns else 0
         worked_days = int((daily_emp["Minutos"] > 0).sum()) if not daily_emp.empty else 0
         missing_days = len(missing_map.get(employee_key, []))
@@ -1823,29 +1940,47 @@ def compact_employee_summary(
             else 0
         )
 
-        status = "OK"
         if incomplete_days > 0:
             status = "REVISAR MARCAS"
-        elif missing_days > 0 or days_with_missing_hours > 0:
+        elif net_balance < 0:
+            status = "DEBE COMPENSAR"
+        elif missing_days > 0:
             status = "REVISAR AUSENCIAS"
+        elif net_balance > 0:
+            status = "SALDO A FAVOR"
+        else:
+            status = "BALANCE EN CERO"
 
         rows.append(
             {
                 "Empleado": item["Empleado"],
                 "DNI": display_dni(item["DNI"]),
                 "Tipo": item["Tipo"],
-                "Horas_extra": minutes_to_hhmm(extra_minutes),
-                "Extras_min": extra_minutes,
+
+                # El dato principal para RRHH luego de compensar faltantes.
+                "Horas_extra": minutes_to_hhmm(extra_favor),
+                "Extras_min": extra_favor,
+
+                # Transparencia del cálculo.
+                "Extra_bruta": minutes_to_hhmm(gross_extra),
+                "Extras_brutas_min": gross_extra,
+                "Horas_faltantes": minutes_to_hhmm(missing_minutes),
+                "Faltantes_min": missing_minutes,
+                "Saldo_periodo": delta_short(net_balance),
+                "Saldo_neto_min": net_balance,
+                "Deuda_pendiente": minutes_to_hhmm(debt_pending),
+                "Deuda_pendiente_min": debt_pending,
+
                 "Días_con_extra": days_with_extra,
+                "Días_con_horas_faltantes": days_with_missing_hours,
                 "Días_trabajados": worked_days,
                 "Días_sin_marcación": missing_days,
                 "Días_marca_incompleta": incomplete_days,
-                "Días_con_horas_faltantes": days_with_missing_hours,
                 "Entrada_promedio": arrival_average,
                 "Salida_promedio": departure_average,
                 "Total_trabajado": minutes_to_hhmm(total_minutes),
+                "Esperado_periodo": minutes_to_hhmm(expected_minutes),
                 "Horas_normales": minutes_to_hhmm(normal_minutes),
-                "Horas_faltantes": minutes_to_hhmm(missing_minutes),
                 "Marcaciones": int(daily_emp["Marcaciones"].sum()) if not daily_emp.empty else 0,
                 "Dobles_marcas_ignoradas": duplicates_ignored,
                 "Estado": status,
@@ -1855,7 +1990,7 @@ def compact_employee_summary(
 
     result = pd.DataFrame(rows)
     return result.sort_values(
-        ["Extras_min", "Empleado"],
+        ["Saldo_neto_min", "Empleado"],
         ascending=[False, True],
     ).reset_index(drop=True)
 
@@ -1933,36 +2068,94 @@ def compact_employee_metrics(
 ) -> dict:
     missing_map = missing_workdays_by_employee(raw, holidays)
 
-    if daily_emp is None or daily_emp.empty:
-        return {
-            "extra": 0,
-            "total": 0,
-            "normal": 0,
-            "missing_minutes": 0,
-            "worked_days": 0,
-            "missing_days": len(missing_map.get(employee_key, [])),
-            "incomplete_days": 0,
-            "days_with_extra": 0,
-            "duplicates": 0,
-            "arrival": "—",
-            "departure": "—",
-        }
+    base = {
+        "extra": 0,
+        "gross_extra": 0,
+        "total": 0,
+        "total_valid": 0,
+        "normal": 0,
+        "missing_minutes": 0,
+        "net_balance": 0,
+        "extra_favor": 0,
+        "debt_pending": 0,
+        "expected": 0,
+        "worked_days": 0,
+        "missing_days": len(missing_map.get(employee_key, [])),
+        "incomplete_days": 0,
+        "days_with_extra": 0,
+        "days_with_missing": 0,
+        "balanced_days": 0,
+        "duplicates": 0,
+        "largest_extra": 0,
+        "largest_missing": 0,
+        "coverage_pct": 0.0,
+        "arrival": "—",
+        "departure": "—",
+    }
 
-    complete = daily_emp[daily_emp["Incompleto"] != "SI"].copy()
-    valid_days = complete.copy()
+    if daily_emp is None or daily_emp.empty:
+        return base
+
+    # Días incompletos quedan FUERA del balance económico hasta ser revisados/corregidos.
+    valid_days = daily_emp[daily_emp["Incompleto"] != "SI"].copy()
+
+    gross_extra = (
+        int(valid_days["Extra_dia_min"].sum())
+        if not valid_days.empty and "Extra_dia_min" in valid_days.columns
+        else 0
+    )
+    missing_minutes = (
+        int(valid_days["Faltante_dia_min"].sum())
+        if not valid_days.empty and "Faltante_dia_min" in valid_days.columns
+        else 0
+    )
+
+    net_balance = gross_extra - missing_minutes
+    extra_favor = max(net_balance, 0)
+    debt_pending = max(-net_balance, 0)
+
+    expected_minutes = (
+        int(valid_days["Esperado_min"].sum())
+        if not valid_days.empty and "Esperado_min" in valid_days.columns
+        else 0
+    )
+    total_valid = (
+        int(valid_days["Minutos"].sum())
+        if not valid_days.empty and "Minutos" in valid_days.columns
+        else 0
+    )
+
+    # El porcentaje puede superar 100% cuando existen extras.
+    coverage_pct = (
+        (total_valid / expected_minutes * 100)
+        if expected_minutes > 0
+        else 0.0
+    )
 
     return {
-        "extra": int(daily_emp["Extra_dia_min"].sum()) if "Extra_dia_min" in daily_emp.columns else 0,
+        # compatibilidad con código anterior: "extra" pasa a representar extra A FAVOR.
+        "extra": extra_favor,
+        "gross_extra": gross_extra,
         "total": int(daily_emp["Minutos"].sum()),
+        "total_valid": total_valid,
         "normal": int(daily_emp["Normal_min"].sum()) if "Normal_min" in daily_emp.columns else 0,
-        "missing_minutes": int(valid_days["Faltante_dia_min"].sum()) if "Faltante_dia_min" in valid_days.columns else 0,
+        "missing_minutes": missing_minutes,
+        "net_balance": net_balance,
+        "extra_favor": extra_favor,
+        "debt_pending": debt_pending,
+        "expected": expected_minutes,
         "worked_days": int((daily_emp["Minutos"] > 0).sum()),
         "missing_days": len(missing_map.get(employee_key, [])),
         "incomplete_days": int((daily_emp["Incompleto"] == "SI").sum()),
-        "days_with_extra": int((daily_emp["Extra_dia_min"] > 0).sum()) if "Extra_dia_min" in daily_emp.columns else 0,
+        "days_with_extra": int((valid_days["Extra_dia_min"] > 0).sum()) if "Extra_dia_min" in valid_days.columns else 0,
+        "days_with_missing": int((valid_days["Faltante_dia_min"] > 0).sum()) if "Faltante_dia_min" in valid_days.columns else 0,
+        "balanced_days": int((valid_days["Saldo_min"] == 0).sum()) if "Saldo_min" in valid_days.columns else 0,
         "duplicates": int(daily_emp["Duplicadas_ignoradas"].sum()) if "Duplicadas_ignoradas" in daily_emp.columns else 0,
-        "arrival": average_clock_time(complete["Primera"]) if not complete.empty else "—",
-        "departure": average_clock_time(complete["Ultima"], overnight_as_next_day=True) if not complete.empty else "—",
+        "largest_extra": int(valid_days["Extra_dia_min"].max()) if not valid_days.empty and "Extra_dia_min" in valid_days.columns else 0,
+        "largest_missing": int(valid_days["Faltante_dia_min"].max()) if not valid_days.empty and "Faltante_dia_min" in valid_days.columns else 0,
+        "coverage_pct": coverage_pct,
+        "arrival": average_clock_time(valid_days["Primera"]) if not valid_days.empty else "—",
+        "departure": average_clock_time(valid_days["Ultima"], overnight_as_next_day=True) if not valid_days.empty else "—",
     }
 
 
@@ -1973,9 +2166,12 @@ def build_employee_period_table(
     holidays: set[date],
 ) -> pd.DataFrame:
     """
-    Planilla continua del período:
-    incluye todos los días hábiles esperados y cualquier feriado/fin de semana
-    donde efectivamente hubo marcaciones.
+    Planilla continua del período.
+
+    Además del saldo diario, agrega SALDO ACUMULADO:
+    cada saldo positivo compensa saldos negativos anteriores y viceversa.
+    Los días sin marcación o incompletos quedan para revisión y NO alteran
+    automáticamente el balance.
     """
     start, end = period_dates(raw)
     actual = compact_daily_table(daily_emp)
@@ -2000,10 +2196,29 @@ def build_employee_period_table(
         for _, row in actual.iterrows():
             actual_map[row["Fecha"]] = row.to_dict()
 
+    # Mapa numérico para poder acumular el saldo de días confirmados.
+    saldo_map = {}
+    incomplete_map = {}
+    if daily_emp is not None and not daily_emp.empty:
+        for _, row in daily_emp.iterrows():
+            day = pd.to_datetime(row["Fecha"]).date()
+            saldo_map[day] = int(row.get("Saldo_min", 0))
+            incomplete_map[day] = str(row.get("Incompleto", "")) == "SI"
+
     rows = []
+    running_balance = 0
+
     for day in all_dates:
         if day in actual_map:
-            rows.append(actual_map[day])
+            row = dict(actual_map[day])
+
+            if not incomplete_map.get(day, False):
+                running_balance += int(saldo_map.get(day, 0))
+                row["Saldo_acumulado"] = delta_short(running_balance)
+            else:
+                row["Saldo_acumulado"] = f"{delta_short(running_balance)} · REVISAR"
+
+            rows.append(row)
             continue
 
         rows.append(
@@ -2022,6 +2237,7 @@ def build_employee_period_table(
                 "Extra_dia": "00:00",
                 "Faltante_dia": "—",
                 "Saldo": "REVISAR",
+                "Saldo_acumulado": f"{delta_short(running_balance)} · SIN CAMBIO",
                 "Marcaciones": 0,
                 "Marcaciones_efectivas": 0,
                 "Duplicadas_ignoradas": 0,
@@ -2031,7 +2247,19 @@ def build_employee_period_table(
             }
         )
 
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+
+    preferred_order = [
+        "Fecha", "Empleado", "DNI", "Tipo_dia",
+        "Primera", "Ultima",
+        "Marcaciones_detalle", "Marcaciones_efectivas_detalle", "Tramos_detalle",
+        "Horas", "Normal", "Extra_dia", "Faltante_dia",
+        "Saldo", "Saldo_acumulado",
+        "Marcaciones", "Marcaciones_efectivas",
+        "Duplicadas_ignoradas", "Duplicadas_detalle",
+        "Estado_día", "Ajuste_madrugada",
+    ]
+    return result[[c for c in preferred_order if c in result.columns]]
 
 
 def export_printable_employee_workbook(
@@ -2070,7 +2298,8 @@ def export_printable_employee_workbook(
         "NORMAL",
         "EXTRA",
         "FALTANTE",
-        "SALDO",
+        "SALDO DÍA",
+        "SALDO ACUM.",
         "ESTADO",
         "DOBLES IGNORADAS",
     ]
@@ -2123,9 +2352,10 @@ def export_printable_employee_workbook(
 
         ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=len(headers))
         totals = (
-            f"HORAS EXTRA: {s['Horas_extra']}   ·   TOTAL TRABAJADO: {s['Total_trabajado']}   ·   "
-            f"DÍAS TRABAJADOS: {s['Días_trabajados']}   ·   DÍAS SIN MARCACIÓN: {s['Días_sin_marcación']}   ·   "
-            f"MARCAS INCOMPLETAS: {s['Días_marca_incompleta']}   ·   DOBLES IGNORADAS: {s.get('Dobles_marcas_ignoradas', 0)}"
+            f"EXTRA A FAVOR: {s['Horas_extra']}   ·   EXTRA GENERADA: {s.get('Extra_bruta', '00:00')}   ·   "
+            f"A COMPENSAR: {s.get('Horas_faltantes', '00:00')}   ·   SALDO: {s.get('Saldo_periodo', '0M')}   ·   "
+            f"TOTAL TRABAJADO: {s['Total_trabajado']}   ·   DÍAS SIN MARCACIÓN: {s['Días_sin_marcación']}   ·   "
+            f"MARCAS INCOMPLETAS: {s['Días_marca_incompleta']}"
         )
         c = ws.cell(current_row, 1, totals)
         c.font = Font(bold=True, size=9)
@@ -2134,7 +2364,8 @@ def export_printable_employee_workbook(
 
         ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=len(headers))
         legend = (
-            "SALDO = DIFERENCIA DEL DÍA: POSITIVO ES EXTRA, NEGATIVO ES FALTANTE. "
+            "SALDO DÍA = TRABAJADO MENOS ESPERADO. SALDO ACUMULADO = SUMA CORRIDA DE LOS SALDOS DEL PERÍODO; "
+            "LOS EXCEDENTES POSTERIORES PUEDEN COMPENSAR FALTANTES ANTERIORES. "
             f"DOBLE MARCA = DOS LECTURAS A {DUPLICATE_PUNCH_WINDOW_MINUTES} MINUTOS O MENOS; "
             "SE MUESTRAN TODAS, PERO PARA EL CÁLCULO SE USA UN SOLO EVENTO."
         )
@@ -2167,6 +2398,7 @@ def export_printable_employee_workbook(
                 row.get("Extra_dia", ""),
                 row.get("Faltante_dia", ""),
                 row.get("Saldo", ""),
+                row.get("Saldo_acumulado", ""),
                 row.get("Estado_día", ""),
                 row.get("Duplicadas_ignoradas", 0),
             ]
@@ -2177,7 +2409,7 @@ def export_printable_employee_workbook(
                 cell = ws.cell(current_row, col_idx, value)
                 cell.border = border
                 cell.alignment = Alignment(
-                    horizontal="center" if col_idx not in [5, 6, 7, 13] else "left",
+                    horizontal="center" if col_idx not in [5, 6, 7, 14] else "left",
                     vertical="top",
                     wrap_text=True,
                 )
@@ -2200,7 +2432,7 @@ def export_printable_employee_workbook(
         "A": 11, "B": 17, "C": 9, "D": 9,
         "E": 25, "F": 23, "G": 32,
         "H": 11, "I": 10, "J": 10, "K": 10,
-        "L": 11, "M": 28, "N": 12,
+        "L": 11, "M": 13, "N": 28, "O": 12,
     }
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
@@ -2219,7 +2451,7 @@ def export_printable_employee_workbook(
     ws.oddFooter.right.text = "Control de Asistencia"
 
     if current_row > 1:
-        ws.print_area = f"A1:N{current_row - 1}"
+        ws.print_area = f"A1:O{current_row - 1}"
 
     output = io.BytesIO()
     wb.save(output)
@@ -2261,7 +2493,7 @@ def export_compact_excel(
     control = pd.DataFrame(
         [{
             "Periodo": period_text,
-            "Horas_extra_totales": minutes_to_hhmm(total_extra),
+            "Extra_a_favor_total": minutes_to_hhmm(total_extra),
             "Criterio_ausencias": "DÍAS HÁBILES DEL PERÍODO SIN MARCACIÓN; REVISAR LICENCIAS Y JUSTIFICACIONES.",
         }]
     )
@@ -2541,6 +2773,8 @@ def main() -> None:
         )
 
         total_extra = int(compact_summary["Extras_min"].sum()) if not compact_summary.empty else 0
+        total_gross_extra = int(compact_summary["Extras_brutas_min"].sum()) if not compact_summary.empty and "Extras_brutas_min" in compact_summary.columns else total_extra
+        total_missing_hours = int(compact_summary["Faltantes_min"].sum()) if not compact_summary.empty and "Faltantes_min" in compact_summary.columns else 0
         total_worked = int(daily["Minutos"].sum()) if not daily.empty else 0
         worked_days = int((daily["Minutos"] > 0).sum()) if not daily.empty else 0
         missing_days = int(compact_summary["Días_sin_marcación"].sum()) if not compact_summary.empty else 0
@@ -2562,13 +2796,13 @@ def main() -> None:
 
         kpi_row_1 = st.columns(4)
         with kpi_row_1[0]:
-            kpi_card("HORAS EXTRA", minutes_to_hhmm(total_extra), "TOTAL DEL EXCEL CARGADO")
+            kpi_card("EXTRA A FAVOR", minutes_to_hhmm(total_extra), "EXTRA NETA DESPUÉS DE COMPENSAR FALTANTES", tone="positive")
         with kpi_row_1[1]:
-            kpi_card("PERÍODO", period_text, "LO DEFINE EL ARCHIVO")
+            kpi_card("EXTRA GENERADA", minutes_to_hhmm(total_gross_extra), "SUMA DE TODOS LOS EXCEDENTES DIARIOS", tone="neutral")
         with kpi_row_1[2]:
-            kpi_card("EMPLEADOS", str(len(compact_summary)), "PERSONAS PROCESADAS")
+            kpi_card("HORAS A COMPENSAR", minutes_to_hhmm(total_missing_hours), "SUMA DE SALIDAS TEMPRANAS / JORNADAS CORTAS", tone="negative" if total_missing_hours > 0 else "neutral")
         with kpi_row_1[3]:
-            kpi_card("DÍAS TRABAJADOS", str(worked_days), "REGISTROS DÍA/EMPLEADO CON HORAS")
+            kpi_card("PERÍODO", period_text, f"{len(compact_summary)} EMPLEADOS PROCESADOS", tone="neutral")
 
         kpi_row_2 = st.columns(4)
         with kpi_row_2[0]:
@@ -2582,9 +2816,9 @@ def main() -> None:
 
         explain_box(
             "CÓMO INTERPRETAR LOS DATOS",
-            "HORAS EXTRA = TODO LO QUE SUPERA LA JORNADA DIARIA, MÁS TODO LO TRABAJADO EN FERIADOS Y FINES DE SEMANA. "
-            "SALDO = DIFERENCIA ENTRE LO TRABAJADO Y LO ESPERADO DEL DÍA: POSITIVO ES EXTRA Y NEGATIVO ES FALTANTE. "
-            "MARCAS INCOMPLETAS SE CALCULAN DESPUÉS DE IGNORAR DOBLES LECTURAS DEL BIOMÉTRICO."
+            "EXTRA GENERADA = SUMA DE TODOS LOS EXCEDENTES DIARIOS. HORAS A COMPENSAR = SUMA DE LOS DÍAS DONDE TRABAJÓ MENOS DE LO ESPERADO. "
+            "SALDO DEL PERÍODO = EXTRA GENERADA MENOS HORAS A COMPENSAR. EXTRA A FAVOR ES SOLO EL SALDO POSITIVO FINAL. "
+            "LOS DÍAS SIN MARCACIÓN Y LOS DÍAS INCOMPLETOS QUEDAN PARA REVISIÓN Y NO SE DESCUENTAN AUTOMÁTICAMENTE."
         )
         st.markdown(
             f'<div class="pill">DOBLES MARCAS IGNORADAS: {duplicates_ignored} · DOS LECTURAS A 2 MINUTOS O MENOS CUENTAN COMO UN SOLO EVENTO</div>',
@@ -2610,8 +2844,24 @@ def main() -> None:
             hide_index=True,
             column_config={
                 "Horas_extra": st.column_config.TextColumn(
-                    "HORAS EXTRA",
-                    help="SUMA DEL EXCEDENTE DIARIO Y DE TODO LO TRABAJADO EN FERIADOS O FINES DE SEMANA.",
+                    "EXTRA A FAVOR",
+                    help="SALDO POSITIVO FINAL DESPUÉS DE RESTAR LAS HORAS FALTANTES DEL PERÍODO.",
+                ),
+                "Extra_bruta": st.column_config.TextColumn(
+                    "EXTRA GENERADA",
+                    help="SUMA BRUTA DE TODOS LOS EXCEDENTES DIARIOS ANTES DE COMPENSAR FALTANTES.",
+                ),
+                "Horas_faltantes": st.column_config.TextColumn(
+                    "HORAS A COMPENSAR",
+                    help="SUMA DE LOS MINUTOS QUE FALTARON PARA COMPLETAR LA JORNADA EN DÍAS VÁLIDOS.",
+                ),
+                "Saldo_periodo": st.column_config.TextColumn(
+                    "SALDO DEL PERÍODO",
+                    help="EXTRA GENERADA MENOS HORAS A COMPENSAR. POSITIVO = A FAVOR. NEGATIVO = DEUDA.",
+                ),
+                "Deuda_pendiente": st.column_config.TextColumn(
+                    "DEUDA PENDIENTE",
+                    help="SI EL SALDO ES NEGATIVO, MUESTRA CUÁNTO DEBE COMPENSAR TODAVÍA.",
                 ),
                 "Días_sin_marcación": st.column_config.NumberColumn(
                     "DÍAS SIN MARCACIÓN",
@@ -2800,38 +3050,142 @@ def main() -> None:
             holidays,
         )
 
+        balance_hero(metrics["net_balance"])
+
+        section_title("BALANCE DEL PERÍODO")
         employee_row_1 = st.columns(4)
         with employee_row_1[0]:
-            kpi_card("HORAS EXTRA", minutes_to_hhmm(metrics["extra"]), "TOTAL DEL PERÍODO")
+            balance_tone = "positive" if metrics["net_balance"] > 0 else "negative" if metrics["net_balance"] < 0 else "neutral"
+            kpi_card(
+                "SALDO DEL PERÍODO",
+                delta_short(metrics["net_balance"]),
+                "EXTRA GENERADA − HORAS A COMPENSAR",
+                tone=balance_tone,
+            )
         with employee_row_1[1]:
-            kpi_card("DÍAS CON EXTRA", str(metrics["days_with_extra"]), "DÍAS QUE SUMARON EXCEDENTE")
+            kpi_card(
+                "EXTRA A FAVOR",
+                minutes_to_hhmm(metrics["extra_favor"]),
+                "LO QUE QUEDA POSITIVO DESPUÉS DE COMPENSAR",
+                tone="positive" if metrics["extra_favor"] > 0 else "neutral",
+            )
         with employee_row_1[2]:
-            kpi_card("DÍAS TRABAJADOS", str(metrics["worked_days"]), "DÍAS CON HORAS CALCULADAS")
+            kpi_card(
+                "EXTRA GENERADA",
+                minutes_to_hhmm(metrics["gross_extra"]),
+                "SUMA BRUTA DE LOS EXCEDENTES DE CADA DÍA",
+                tone="neutral",
+            )
         with employee_row_1[3]:
-            kpi_card("DÍAS SIN MARCACIÓN", str(metrics["missing_days"]), "DÍAS HÁBILES SIN REGISTRO")
+            kpi_card(
+                "HORAS A COMPENSAR",
+                minutes_to_hhmm(metrics["missing_minutes"]),
+                "TIEMPO QUE FALTÓ PARA COMPLETAR JORNADAS",
+                tone="negative" if metrics["missing_minutes"] > 0 else "neutral",
+            )
 
+        section_title("JORNADA Y CUMPLIMIENTO")
         employee_row_2 = st.columns(4)
         with employee_row_2[0]:
-            kpi_card("MARCAS INCOMPLETAS", str(metrics["incomplete_days"]), "DÍAS CON MARCAS IMPARES")
+            kpi_card(
+                "TOTAL TRABAJADO",
+                minutes_to_hhmm(metrics["total"]),
+                "TODOS LOS TRAMOS CALCULADOS DEL PERÍODO",
+                tone="neutral",
+            )
         with employee_row_2[1]:
-            kpi_card("ENTRADA PROMEDIO", metrics["arrival"], "PRIMERA MARCA PROMEDIO")
+            kpi_card(
+                "HORAS ESPERADAS",
+                minutes_to_hhmm(metrics["expected"]),
+                "SUMA DE LA JORNADA ESPERADA EN DÍAS VÁLIDOS",
+                tone="neutral",
+            )
         with employee_row_2[2]:
-            kpi_card("SALIDA PROMEDIO", metrics["departure"], "ÚLTIMA MARCA PROMEDIO")
+            kpi_card(
+                "HORAS NORMALES",
+                minutes_to_hhmm(metrics["normal"]),
+                "TIEMPO IMPUTADO DENTRO DE LA JORNADA",
+                tone="neutral",
+            )
         with employee_row_2[3]:
-            kpi_card("TOTAL TRABAJADO", minutes_to_hhmm(metrics["total"]), f"NORMAL: {minutes_to_hhmm(metrics['normal'])}")
+            kpi_card(
+                "CUMPLIMIENTO",
+                f"{metrics['coverage_pct']:.1f}%",
+                "TRABAJADO VÁLIDO / HORAS ESPERADAS",
+                tone="positive" if metrics["coverage_pct"] >= 100 else "warning",
+            )
 
-        st.markdown(
-            f'<div class="pill">DOBLES MARCAS IGNORADAS DE ESTE EMPLEADO: {metrics.get("duplicates", 0)}</div>',
-            unsafe_allow_html=True,
-        )
+        section_title("COMPORTAMIENTO DEL PERÍODO")
+        employee_row_3 = st.columns(4)
+        with employee_row_3[0]:
+            kpi_card(
+                "DÍAS CON EXTRA",
+                str(metrics["days_with_extra"]),
+                f"MAYOR EXTRA EN UN DÍA: {minutes_to_hhmm(metrics['largest_extra'])}",
+                tone="positive" if metrics["days_with_extra"] > 0 else "neutral",
+            )
+        with employee_row_3[1]:
+            kpi_card(
+                "DÍAS CON FALTANTE",
+                str(metrics["days_with_missing"]),
+                f"MAYOR FALTANTE EN UN DÍA: {minutes_to_hhmm(metrics['largest_missing'])}",
+                tone="negative" if metrics["days_with_missing"] > 0 else "neutral",
+            )
+        with employee_row_3[2]:
+            kpi_card(
+                "ENTRADA PROMEDIO",
+                metrics["arrival"],
+                "PROMEDIO DE PRIMERA MARCA EN DÍAS VÁLIDOS",
+                tone="neutral",
+            )
+        with employee_row_3[3]:
+            kpi_card(
+                "SALIDA PROMEDIO",
+                metrics["departure"],
+                "PROMEDIO DE ÚLTIMA MARCA EN DÍAS VÁLIDOS",
+                tone="neutral",
+            )
+
+        section_title("CONTROL Y REVISIÓN")
+        employee_row_4 = st.columns(4)
+        with employee_row_4[0]:
+            kpi_card(
+                "DÍAS TRABAJADOS",
+                str(metrics["worked_days"]),
+                "DÍAS CON HORAS CALCULADAS",
+                tone="neutral",
+            )
+        with employee_row_4[1]:
+            kpi_card(
+                "DÍAS SIN MARCACIÓN",
+                str(metrics["missing_days"]),
+                "NO DESCUENTAN AUTOMÁTICAMENTE; REVISAR LICENCIA",
+                tone="warning" if metrics["missing_days"] > 0 else "neutral",
+            )
+        with employee_row_4[2]:
+            kpi_card(
+                "MARCAS INCOMPLETAS",
+                str(metrics["incomplete_days"]),
+                "QUEDAN FUERA DEL BALANCE HASTA SER REVISADAS",
+                tone="warning" if metrics["incomplete_days"] > 0 else "neutral",
+            )
+        with employee_row_4[3]:
+            kpi_card(
+                "DOBLES IGNORADAS",
+                str(metrics["duplicates"]),
+                "LECTURAS BIOMÉTRICAS REPETIDAS QUE NO ALTERAN EL CÁLCULO",
+                tone="neutral",
+            )
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
         explain_box(
-            "QUÉ SIGNIFICA CADA VALOR",
-            "TRABAJADO = SUMA DE LOS TRAMOS REALES ENTRADA/SALIDA. NORMAL = PARTE QUE CUBRE LA JORNADA. "
-            "EXTRA = EXCEDENTE DEL DÍA O TODO LO TRABAJADO EN DÍA ESPECIAL. FALTANTE = LO QUE FALTÓ PARA COMPLETAR. "
-            "SALDO = EXTRA MENOS FALTANTE. TODAS LAS MARCACIONES MUESTRA EL RELOJ TAL CUAL; MARCAS USADAS MUESTRA LAS QUE ENTRARON AL CÁLCULO."
+            "CÓMO FUNCIONA EL BALANCE",
+            "CADA DÍA HÁBIL TIENE UNA JORNADA ESPERADA DE 7 HORAS, O 6 SI ESTÁ ACTIVO HORARIO REDUCIDO. "
+            "SI TRABAJA MÁS, ESE EXCEDENTE SE SUMA COMO EXTRA GENERADA. SI TRABAJA MENOS, ESA DIFERENCIA SE SUMA COMO HORAS A COMPENSAR. "
+            "AL FINAL DEL PERÍODO: EXTRA GENERADA − HORAS A COMPENSAR = SALDO. "
+            "UN SALDO POSITIVO ES EXTRA A FAVOR; UN SALDO NEGATIVO ES TIEMPO QUE TODAVÍA DEBE COMPENSAR. "
+            "LOS DÍAS SIN MARCACIÓN Y LOS DÍAS INCOMPLETOS NO MODIFICAN EL BALANCE HASTA QUE RRHH LOS REVISE."
         )
 
         employee_daily = build_employee_period_table(
@@ -2863,8 +3217,12 @@ def main() -> None:
                     width="large",
                 ),
                 "Saldo": st.column_config.TextColumn(
-                    "SALDO",
-                    help="POSITIVO = HORAS EXTRA. NEGATIVO = HORAS FALTANTES. REVISAR = DÍA SIN MARCACIÓN.",
+                    "SALDO DEL DÍA",
+                    help="DIFERENCIA DEL DÍA. POSITIVO = EXTRA; NEGATIVO = TIEMPO A COMPENSAR.",
+                ),
+                "Saldo_acumulado": st.column_config.TextColumn(
+                    "SALDO ACUMULADO",
+                    help="BALANCE CORRIDO DEL PERÍODO. UN DÍA CON EXTRA PUEDE COMPENSAR UN FALTANTE DE OTRO DÍA.",
                 ),
                 "Duplicadas_ignoradas": st.column_config.NumberColumn(
                     "DOBLES IGNORADAS",
